@@ -1,0 +1,10 @@
+data/raw/
+data/intermediate/
+*.mp4
+*.mov
+*.avi
+*.csv
+.DS_Store
+venv/
+__pycache__/
+*.pyc
