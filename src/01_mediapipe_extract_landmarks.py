@@ -24,7 +24,7 @@ POSE_OUTPUT_DIR = Path(config.INTERMEDIATE_DIR) / "mediapipe_pose"
 
 MODEL_COMPLEXITY = 1
 FORCE_REPROCESS = False   # True = retraite même si le fichier de sortie existe déjà
-MAX_VIDEOS = None         # mets un petit nombre (ex. 2) pour tester avant de lancer sur les 120
+MAX_VIDEOS = 2         # mets un petit nombre (ex. 2) pour tester avant de lancer sur les 120
 
 mp_pose = mp.solutions.pose
 POSE_LANDMARKS = [lm.name for lm in mp_pose.PoseLandmark]
