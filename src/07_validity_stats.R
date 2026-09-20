@@ -32,6 +32,15 @@ compute_validity <- function(x_mp, x_vicon, label) {
 
   icc_res <- psych::ICC(d[, c("MP", "VICON")])
 
+  # Test formel de biais proportionnel (Bland-Altman) : regression de la
+  # difference (MP - VICON) sur la moyenne des deux systemes. Une pente
+  # significativement differente de zero indique un biais proportionnel
+  # (l'ecart varie avec la magnitude du mouvement) plutot qu'un biais constant.
+  mean_systems <- (d$MP + d$VICON) / 2
+  ba_lm <- lm(diff ~ mean_systems)
+  ba_slope <- unname(coef(ba_lm)[2])
+  ba_slope_p <- summary(ba_lm)$coefficients[2, "Pr(>|t|)"]
+
   tibble(
     label = label,
     n = nrow(d),
@@ -46,7 +55,9 @@ compute_validity <- function(x_mp, x_vicon, label) {
     RMSE = sqrt(mean(diff^2)),
     bias_MP_minus_VICON = bias,
     LoA_lower = bias - 1.96 * sd_diff,
-    LoA_upper = bias + 1.96 * sd_diff
+    LoA_upper = bias + 1.96 * sd_diff,
+    BA_slope = ba_slope,
+    BA_slope_p = ba_slope_p
   )
 }
 
