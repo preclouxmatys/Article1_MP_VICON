@@ -12,24 +12,25 @@ participant x condition observations.
 
 ## Repository structure
 
+```
 Article1_MP_VICON/
 ├── src/
-│ ├── config.py # paths and processing parameters
-│ ├── 01_mediapipe_extract_landmarks.py # raw video -> MediaPipe Pose landmarks
-│ ├── 02_vicon_compute_qom_shoulder.py # Vicon CSV -> QoM (wrist, head) + shoulder width
-│ ├── 03_mediapipe_compute_qom_shoulder.py # MediaPipe pose -> QoM (wrist, head) + shoulder width
-│ ├── 04_build_comparison_table.py # merges Vicon + MediaPipe QoM into the final long-format table
-│ ├── 05_amplitude_mp_vs_vicon.py # wrist peak-to-peak amplitude, MediaPipe vs Vicon (3 projection planes)
-│ ├── 06_elbow_angle_mp_vs_vicon.py # elbow angle, MediaPipe (2D) vs Vicon (3D and projected 2D, 3 planes)
-│ ├── 07_validity_stats.R # r, R^2, ICC(2,1), RMSE, bias, Bland-Altman, figures
-│ └── 08_permutation_test.py # dyad x condition constrained permutation test
+│   ├── config.py                          # paths and processing parameters
+│   ├── 01_mediapipe_extract_landmarks.py  # raw video -> MediaPipe Pose landmarks
+│   ├── 02_vicon_compute_qom_shoulder.py   # Vicon CSV -> QoM (wrist, head) + shoulder width
+│   ├── 03_mediapipe_compute_qom_shoulder.py # MediaPipe pose -> QoM (wrist, head) + shoulder width
+│   ├── 04_build_comparison_table.py       # merges Vicon + MediaPipe QoM into the final long-format table
+│   ├── 05_amplitude_mp_vs_vicon.py        # wrist peak-to-peak amplitude, MediaPipe vs Vicon (3 projection planes)
+│   ├── 06_elbow_angle_mp_vs_vicon.py      # elbow angle, MediaPipe (2D) vs Vicon (3D and projected 2D, 3 planes)
+│   ├── 07_validity_stats.R                # r, R^2, ICC(2,1), RMSE, bias, Bland-Altman, figures
+│   └── 08_permutation_test.py             # dyad x condition constrained permutation test
 ├── data/
-│ ├── raw/ # NOT included in this repo (see Data availability below)
-│ ├── intermediate/ # generated automatically, not versioned
-│ └── final/ # final comparison tables, statistics, and figures (versioned)
+│   ├── raw/            # NOT included in this repo (see Data availability below)
+│   ├── intermediate/   # generated automatically, not versioned
+│   └── final/           # final comparison tables, statistics, and figures (versioned)
 ├── requirements.txt
 └── README.md
-
+```
 
 ## Setup
 
