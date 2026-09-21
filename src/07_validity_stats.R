@@ -24,14 +24,14 @@ dir.create(FIG_DIR, showWarnings = FALSE, recursive = TRUE)
 # ---------------------------------------------------------
 compute_validity <- function(x_mp, x_vicon, label) {
   d <- tibble(MP = x_mp, VICON = x_vicon) %>% drop_na()
-
+  
   r_test <- cor.test(d$MP, d$VICON, method = "pearson")
   diff <- d$MP - d$VICON
   bias <- mean(diff)
   sd_diff <- sd(diff)
-
+  
   icc_res <- psych::ICC(d[, c("MP", "VICON")])
-
+  
   # Test formel de biais proportionnel (Bland-Altman) : regression de la
   # difference (MP - VICON) sur la moyenne des deux systemes. Une pente
   # significativement differente de zero indique un biais proportionnel
@@ -40,7 +40,7 @@ compute_validity <- function(x_mp, x_vicon, label) {
   ba_lm <- lm(diff ~ mean_systems)
   ba_slope <- unname(coef(ba_lm)[2])
   ba_slope_p <- summary(ba_lm)$coefficients[2, "Pr(>|t|)"]
-
+  
   tibble(
     label = label,
     n = nrow(d),
@@ -61,13 +61,28 @@ compute_validity <- function(x_mp, x_vicon, label) {
   )
 }
 
+# ---------------------------------------------------------
+# Moyenne de coefficients de correlation via transformation de Fisher (z)
+# Justification : la moyenne arithmetique de plusieurs r n'est pas la bonne
+# facon d'agreger des coefficients de correlation (Fisher, 1921) : la
+# transformation z = atanh(r) stabilise la variance, on moyenne en espace z,
+# puis on retransforme avec tanh(). Les valeurs r = +-1 sont bornees pour
+# eviter des z infinis en cas de correlation parfaite.
+# ---------------------------------------------------------
+fisher_mean_r <- function(r_values) {
+  r_values <- r_values[is.finite(r_values)]
+  r_values <- pmin(pmax(r_values, -0.999999), 0.999999)
+  z <- atanh(r_values)
+  tanh(mean(z))
+}
+
 scatter_ba_plots <- function(data, mp_col, vicon_col, label, unit_label) {
   d <- data %>%
     select(all_of(mp_col), all_of(vicon_col)) %>%
     rename(MP = all_of(mp_col), VICON = all_of(vicon_col)) %>%
     mutate(mean_systems = (MP + VICON) / 2, diff_MP_minus_VICON = MP - VICON) %>%
     drop_na()
-
+  
   p_scatter <- ggplot(d, aes(x = VICON, y = MP)) +
     geom_point(alpha = 0.7, size = 2.5) +
     geom_smooth(method = "lm", se = TRUE) +
@@ -76,7 +91,7 @@ scatter_ba_plots <- function(data, mp_col, vicon_col, label, unit_label) {
     scale_y_continuous(labels = comma) +
     labs(title = paste(label, ": MediaPipe vs Vicon"), x = paste("Vicon", unit_label), y = paste("MediaPipe", unit_label)) +
     theme_classic(base_size = 14)
-
+  
   p_ba <- ggplot(d, aes(x = mean_systems, y = diff_MP_minus_VICON)) +
     geom_point(alpha = 0.7, size = 2.5) +
     geom_hline(yintercept = 0, linetype = "dashed") +
@@ -84,7 +99,7 @@ scatter_ba_plots <- function(data, mp_col, vicon_col, label, unit_label) {
     scale_y_continuous(labels = comma) +
     labs(title = paste("Bland-Altman :", label), x = "Moyenne des deux systemes", y = "MediaPipe - Vicon") +
     theme_classic(base_size = 14)
-
+  
   slug <- gsub("[^a-zA-Z0-9]+", "_", tolower(label))
   ggsave(file.path(FIG_DIR, paste0(slug, "_scatter.png")), p_scatter, width = 7, height = 5, dpi = 300)
   ggsave(file.path(FIG_DIR, paste0(slug, "_bland_altman.png")), p_ba, width = 7, height = 5, dpi = 300)
@@ -130,11 +145,11 @@ angle_summary <- angle %>%
   group_by(plane) %>%
   summarise(
     n = n(),
-    mean_r_VI2_bilateral = mean(c(corr_MP_vs_VI2_R, corr_MP_vs_VI2_L), na.rm = TRUE),
+    mean_r_VI2_bilateral = fisher_mean_r(c(corr_MP_vs_VI2_R, corr_MP_vs_VI2_L)),
     sd_r_VI2_bilateral = sd(c(corr_MP_vs_VI2_R, corr_MP_vs_VI2_L), na.rm = TRUE),
     mean_RMSE_VI2_bilateral = mean(c(rmse_MP_vs_VI2_R, rmse_MP_vs_VI2_L), na.rm = TRUE),
     sd_RMSE_VI2_bilateral = sd(c(rmse_MP_vs_VI2_R, rmse_MP_vs_VI2_L), na.rm = TRUE),
-    mean_r_VI3_bilateral = mean(c(corr_MP_vs_VI3_R, corr_MP_vs_VI3_L), na.rm = TRUE),
+    mean_r_VI3_bilateral = fisher_mean_r(c(corr_MP_vs_VI3_R, corr_MP_vs_VI3_L)),
     sd_r_VI3_bilateral = sd(c(corr_MP_vs_VI3_R, corr_MP_vs_VI3_L), na.rm = TRUE),
     mean_RMSE_VI3_bilateral = mean(c(rmse_MP_vs_VI3_R, rmse_MP_vs_VI3_L), na.rm = TRUE),
     sd_RMSE_VI3_bilateral = sd(c(rmse_MP_vs_VI3_R, rmse_MP_vs_VI3_L), na.rm = TRUE),
