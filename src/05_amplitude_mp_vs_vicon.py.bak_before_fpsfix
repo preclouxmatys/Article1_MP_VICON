@@ -15,7 +15,6 @@ Sortie : data/final/comparison_amplitude_long.xlsx
 
 import csv
 import re
-import functools
 from pathlib import Path
 
 import numpy as np
@@ -46,7 +45,6 @@ def parse_vicon_filename(stem: str):
     raise ValueError(f"Condition non reconnue pour le fichier : {stem}")
 
 
-@functools.lru_cache(maxsize=None)
 def read_vicon_csv(csv_path: Path) -> pd.DataFrame:
     with open(csv_path, "r", encoding="utf-8", errors="replace", newline="") as f:
         reader = csv.reader(f)
@@ -69,7 +67,7 @@ def read_vicon_csv(csv_path: Path) -> pd.DataFrame:
             colnames.append(f"{m}_{a}")
         else:
             colnames.append(m if m else a)
-    df = pd.read_csv(csv_path, skiprows=5, header=None, names=colnames, engine="c")
+    df = pd.read_csv(csv_path, skiprows=5, header=None, names=colnames, engine="python")
     return df.dropna(axis=1, how="all")
 
 
@@ -101,25 +99,6 @@ def map_mp_to_vicon_idx(n_mp, n_vicon, fps_mp, fps_vicon):
     return np.clip(idx, 0, n_vicon - 1)
 
 
-def estimate_fps(df):
-    """Estime la frequence d'echantillonnage MediaPipe REELLE a partir des
-    timestamps de la video (colonne t_ms), plutot que d'utiliser la valeur
-    nominale (30 Hz) : la plupart des videos de ce jeu de donnees ont ete
-    enregistrees a ~25 fps (constate empiriquement), pas 30. Utiliser 30
-    fps a tort ici desynchronise progressivement l'appariement Vicon/MP au
-    fil de l'enregistrement (jusqu'a plusieurs dizaines de secondes d'ecart
-    en fin de sequence), ce qui degradait fortement la comparaison frame-a-
-    frame (amplitude et angle du coude) - identique a la fonction utilisee
-    dans 03_mediapipe_compute_qom_shoulder.py."""
-    if "t_ms" not in df.columns:
-        return config.FS_MP_NOMINAL
-    dt_ms = df["t_ms"].diff().dropna()
-    dt_ms = dt_ms[dt_ms > 0]
-    if len(dt_ms) == 0:
-        return config.FS_MP_NOMINAL
-    return 1000.0 / dt_ms.median()
-
-
 def find_mp_pose_file(dyad, pid, condition):
     folder = POSE_DIR / dyad / pid / condition
     candidates = list(folder.glob("*_pose.xlsx"))
@@ -149,9 +128,9 @@ def process_one_pair(csv_path, dyad, condition, pid):
     if mp_path is None:
         return {"dyad": dyad, "condition": condition, "pid": pid, "error": "fichier pose MP introuvable"}
 
-    df_mp = pd.read_excel(mp_path, engine="calamine")
+    df_mp = pd.read_excel(mp_path)
     n_mp = len(df_mp)
-    idx_v = map_mp_to_vicon_idx(n_mp, n_v, estimate_fps(df_mp), config.FS_VICON)
+    idx_v = map_mp_to_vicon_idx(n_mp, n_v, config.FS_MP_NOMINAL, config.FS_VICON)
 
     # --- MediaPipe (2D, unites brutes) ---
     ls_mp = df_mp[["LEFT_SHOULDER_x", "LEFT_SHOULDER_y"]].to_numpy(float)
@@ -209,8 +188,7 @@ def main():
     df["MP_ampWRISTS_pp_mm"] = df["MP_ampWRISTS_pp_raw"] * df["scale_mp_to_mm"]
 
     cols_final = ["dyad", "condition", "pid",
-                  "MP_ampWRISTS_pp_mm", "MP_ampWRISTS_pp_raw",
-                  "shoulder_width_mm", "shoulder_width_mp",
+                  "MP_ampWRISTS_pp_mm",
                   "VICON_XY_ampWRISTS_pp_mm", "VICON_XZ_ampWRISTS_pp_mm", "VICON_YZ_ampWRISTS_pp_mm"]
     df_final = df[[c for c in cols_final if c in df.columns]]
 

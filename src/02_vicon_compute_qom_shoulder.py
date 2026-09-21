@@ -119,7 +119,41 @@ def find_xyz_cols(cols, token):
 # Filtrage + QoM
 # --------------------------
 def butter_lowpass_filt(x, fs=config.FS_VICON, cutoff=config.CUTOFF_HZ, order=config.BUTTER_ORDER):
-    x = np.asarray(x, dtype=float)
+    """Filtre Butterworth passe-bas zero-phase.
+
+    IMPORTANT : scipy.signal.filtfilt propage tout NaN present dans le signal
+    a l'ENSEMBLE de la sortie filtree (le filtre est recursif/IIR, pas local).
+    Un seul frame manquant (occlusion breve d'un marqueur) suffit donc a
+    rendre TOUTE la trajectoire filtree = NaN, ce qui fait ensuite tomber le
+    QoM de ce marqueur/point a 0 de facon silencieuse (somme d'un tableau
+    vide apres filtrage des non-finis), sans aucune erreur ni avertissement.
+    Verifie sur ce jeu de donnees : 2 cas concernes (tous deux P2, STANDING,
+    interruptions breves de 28 et 51 frames sur 18000, soit <0.3-0.5s, tres
+    probablement une occlusion marqueur passagere) - voir aussi
+    qdm_head_midpoint et qdm_for_pair.
+
+    Pour eviter cette perte silencieuse, les trous courts sont d'abord
+    combles par interpolation lineaire (standard pour de breves occlusions
+    de marqueur en mocap) avant le filtrage. Si un trou anormalement long
+    est detecte (>100 frames = 1s a 100Hz), un avertissement est imprime
+    pour verification manuelle plutot que de l'interpoler silencieusement."""
+    x = pd.Series(np.asarray(x, dtype=float))
+    n_nan = int(x.isna().sum())
+    if n_nan:
+        is_nan = x.isna().to_numpy()
+        # plus longue serie consecutive de NaN
+        max_run = 0
+        run = 0
+        for v in is_nan:
+            run = run + 1 if v else 0
+            max_run = max(max_run, run)
+        if max_run > 100:
+            print(f"  ATTENTION : trou de {max_run} frames consecutives detecte "
+                  f"(>1s) - interpolation lineaire appliquee, mais verifier "
+                  f"manuellement que ce n'est pas une perte de donnees plus "
+                  f"serieuse qu'une occlusion breve.")
+        x = x.interpolate(method="linear", limit_direction="both")
+    x = x.to_numpy()
     if len(x) < (order * 3 + 1):
         return x
     nyq = 0.5 * fs
