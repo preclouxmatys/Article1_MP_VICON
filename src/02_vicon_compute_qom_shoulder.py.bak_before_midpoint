@@ -8,14 +8,6 @@ Pour chaque CSV Vicon (un par dyade x condition) :
     avant le calcul de deplacement frame-a-frame
   - normalise le QoM par la largeur d'epaule (ratio sans dimension)
 
-QoM tete : le point milieu des deux marqueurs de tempe est calcule
-frame par frame, PUIS filtre et cumule (UN seul passage), ce qui rend
-la definition comparable au point unique NOSE utilise cote MediaPipe
-(cf. qdm_head_midpoint). Avant modification, la version sommait deux
-QoM calcules separement par marqueur (voir qdm_for_pair, conservee
-ci-dessous pour le QoM poignet, ou les deux marqueurs cote MediaPipe
-sont eux aussi sommes - pas d'asymetrie de definition dans ce cas).
-
 Sortie : data/intermediate/vicon_qom_shoulder.xlsx, format long
          (une ligne par dyade x condition x participant, soit 120 lignes)
 """
@@ -128,14 +120,8 @@ def butter_lowpass_filt(x, fs=config.FS_VICON, cutoff=config.CUTOFF_HZ, order=co
     return filtfilt(b, a, x, method="pad")
 
 
-def motion_quantity_point_filtered(df_or_arr, X=None, Y=None, Z=None):
-    """Calcule le QoM d'un point unique. Accepte soit un DataFrame + noms de
-    colonnes (X, Y, Z), soit directement un array (N, 3) de positions XYZ
-    deja extrait (utilise par qdm_head_midpoint pour le point milieu)."""
-    if isinstance(df_or_arr, pd.DataFrame):
-        arr = df_or_arr[[X, Y, Z]].to_numpy(dtype=float)
-    else:
-        arr = df_or_arr
+def motion_quantity_point_filtered(df, X, Y, Z):
+    arr = df[[X, Y, Z]].to_numpy(dtype=float)
     arr_filt = np.column_stack([
         butter_lowpass_filt(arr[:, 0]),
         butter_lowpass_filt(arr[:, 1]),
@@ -158,10 +144,6 @@ def shoulder_width(df, cols, tok):
 
 
 def qdm_for_pair(df, cols, token_d, token_g):
-    """QoM = somme des deplacements cumules de deux marqueurs calcules
-    SEPAREMENT (filtrage + cumul appliques a chaque marqueur individuellement,
-    puis les deux resultats sont additionnes). Utilise pour le QoM poignet,
-    ou MediaPipe somme aussi les deux poignets - pas d'asymetrie ici."""
     Xd, Yd, Zd = find_xyz_cols(cols, token_d)
     Xg, Yg, Zg = find_xyz_cols(cols, token_g)
     if None in [Xd, Yd, Zd, Xg, Yg, Zg]:
@@ -169,25 +151,6 @@ def qdm_for_pair(df, cols, token_d, token_g):
     q_d, _ = motion_quantity_point_filtered(df, Xd, Yd, Zd)
     q_g, _ = motion_quantity_point_filtered(df, Xg, Yg, Zg)
     return q_d + q_g
-
-
-def qdm_head_midpoint(df, cols, token_d, token_g):
-    """QoM tete = point milieu des deux marqueurs de tempe calcule
-    frame par frame (moyenne des positions X, Y, Z), PUIS filtrage +
-    deplacement cumule appliques UNE seule fois a ce point milieu.
-    Rend la definition Vicon comparable au point unique NOSE utilise
-    cote MediaPipe (au lieu de sommer deux QoM calcules separement,
-    ce qui doublait artificiellement l'amplitude du signal tete Vicon
-    par rapport a MediaPipe)."""
-    Xd, Yd, Zd = find_xyz_cols(cols, token_d)
-    Xg, Yg, Zg = find_xyz_cols(cols, token_g)
-    if None in [Xd, Yd, Zd, Xg, Yg, Zg]:
-        return None
-    arr_d = df[[Xd, Yd, Zd]].to_numpy(dtype=float)
-    arr_g = df[[Xg, Yg, Zg]].to_numpy(dtype=float)
-    midpoint = (arr_d + arr_g) / 2.0
-    q_mid, _ = motion_quantity_point_filtered(midpoint)
-    return q_mid
 
 
 # --------------------------
@@ -202,7 +165,7 @@ def process_one_csv(csv_path: Path):
     for pid, tok in SUBJECT_TOKENS.items():
         sw_mm = shoulder_width(df, cols, tok)
         qdm_wrist_mm = qdm_for_pair(df, cols, tok["WR_D"], tok["WR_G"])
-        qdm_head_mm = qdm_head_midpoint(df, cols, tok["TP_D"], tok["TP_G"])
+        qdm_head_mm = qdm_for_pair(df, cols, tok["TP_D"], tok["TP_G"])
 
         row = {
             "dyad": dyad,
