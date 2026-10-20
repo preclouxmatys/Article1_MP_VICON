@@ -5,3 +5,7 @@ tqdm
 openpyxl
 scipy
 numpy
+pingouin
+statsmodels
+matplotlib
+python-calamine
