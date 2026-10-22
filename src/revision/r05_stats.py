@@ -17,6 +17,16 @@ RNG = np.random.default_rng(42); NBOOT = 5000
 df = pd.DataFrame([json.load(open(f)) for f in sorted(glob.glob(str(REV / "per_recording/*.json")))])
 df.to_csv(REV / "r04_all_recordings.csv", index=False)
 df["subject"] = df.dyad + "_" + df.pid
+# Amplitude normalisee par la largeur d'epaule propre a chaque systeme (sans calibration)
+for k in ["p95p5", "maxmin"]:
+    df[f"AMP_{k}_MP_norm"] = df[f"AMP_{k}_MP_px"] / df.sw_mp_px_med
+    df[f"AMP_{k}_V3D_norm"] = df[f"AMP_{k}_V3D_mm"] / df.sw3_med_mm
+# Controle qualite de la calibration, independant de MediaPipe : une projection ne peut
+# pas allonger un segment ; rapport amplitude projetee / (amplitude 3D x echelle) ~1,3
+# normalement (raccourcissement de la largeur d'epaule en vue oblique). > 3 = echec.
+df["calib_ratio"] = df.AMP_p95p5_VIC_px / (df.AMP_p95p5_V3D_mm * df.px_per_mm)
+df["calib_ok"] = df.calib_ratio <= 3
+dfc = df[df.calib_ok].copy()
 
 
 def icc21(x, y):
@@ -39,7 +49,8 @@ def validity(d, mp, ref, label, boot=True):
     mean_s = (x + y) / 2
     slope = np.polyfit(mean_s, dd, 1)[0]
     from scipy import stats
-    sl = stats.linregress(mean_s, dd)
+    # biais proportionnel teste sur l'echelle log (coherent avec le Bland-Altman en log-ratio)
+    sl = stats.linregress(np.log(np.sqrt(x * y)), lr) if np.isfinite(lr).all() else stats.linregress(mean_s, dd)
     out = dict(label=label, n=n, mean_MP=x.mean(), sd_MP=x.std(ddof=1), mean_ref=mref, sd_ref=y.std(ddof=1),
                r=r, r_lo=np.tanh(z - 1.96 * se), r_hi=np.tanh(z + 1.96 * se), R2=r ** 2,
                ICC=row2["ICC"], ICC_lo=row2["CI95"][0], ICC_hi=row2["CI95"][1],
@@ -74,29 +85,29 @@ def by_condition(d, mp, ref, label):
                       mixed_slope_hi=m.conf_int().loc[ref, 1], mixed_p=m.pvalues[ref])
 
 
-MAIN = [  # (colonne MP, colonne reference, etiquette)
-    ("QOM_WRIST_MP_px", "QOM_WRIST_VIC_px", "QoM poignet (px, plan image)"),
-    ("QOM_WRIST_MP_norm", "QOM_WRIST_V3D25_norm", "QoM poignet (largeurs d'epaule, Vicon 3D)"),
-    ("QOM_HEAD_MP_px", "QOM_HEAD_VIC_px", "QoM tete : nez MP vs nez virtuel (px)"),
-    ("QOM_HEAD_MP_px", "QOM_HEAD_tempmid_VIC_px", "QoM tete : nez MP vs milieu des tempes (px)"),
-    ("AMP_p95p5_MP_px", "AMP_p95p5_VIC_px", "Amplitude poignet P95-P5 (px, plan image)"),
+MAIN = [  # comparaisons principales : SANS calibration (MediaPipe 2D normalise vs Vicon 3D normalise)
+    ("QOM_WRIST_MP_norm", "QOM_WRIST_V3D25_norm", "QoM poignets"),
+    ("QOM_HEAD_MP_norm", "QOM_HEAD_tempmid_V3D25_norm", "QoM tete"),
+    ("AMP_p95p5_MP_norm", "AMP_p95p5_V3D_norm", "Amplitude poignets"),
+]
+IMG = [  # comparaisons secondaires dans le plan image (Vicon projete), calibrations valides
+    ("QOM_WRIST_MP_px", "QOM_WRIST_VIC_px", "QoM poignets (plan image)"),
+    ("QOM_HEAD_MP_px", "QOM_HEAD_tempmid_VIC_px", "QoM tete (plan image)"),
+    ("AMP_p95p5_MP_px", "AMP_p95p5_VIC_px", "Amplitude poignets (plan image)"),
 ]
 SENS = [
-    ("QOM_WRIST_MPnormcoord_norm", "QOM_WRIST_V3D100_norm", "Poignet - definition d'origine (coord. normalisees)"),
-    ("QOM_WRIST_MP_norm", "QOM_WRIST_V3D100_norm", "Poignet - pixels vs Vicon 100 Hz"),
-    ("QOM_WRIST_MP_norm", "QOM_WRIST_VIC_norm", "Poignet - pixels, Vicon projete, normalises"),
-    ("QOM_HEAD_MPnormcoord_norm", "QOM_HEAD_tempmid_V3D100_norm", "Tete - definition d'origine (coord. norm., tempes)"),
-    ("QOM_HEAD_MP_norm", "QOM_HEAD_tempmid_V3D25_norm", "Tete - pixels vs tempes 3D"),
-    ("QOM_HEAD_MP_norm", "QOM_HEAD_V3D25_norm", "Tete - pixels vs nez virtuel 3D"),
-    ("AMP_maxmin_MP_px", "AMP_maxmin_VIC_px", "Amplitude max-min (px, plan image)"),
-    ("AMP_p95p5_MP_mm_shoulderscale", "AMP_p95p5_V3D_mm", "Amplitude P95-P5 mm (echelle epaule) vs 3D"),
-    ("AMP_maxmin_MP_mm_shoulderscale", "AMP_maxmin_V3D_mm", "Amplitude max-min mm (echelle epaule) vs 3D"),
-    ("AMP_p95p5_MP_mm_shoulderscale", "AMP_p95p5_VXY_mm", "Amplitude P95-P5 mm vs plan XY"),
-    ("AMP_p95p5_MP_mm_shoulderscale", "AMP_p95p5_VXZ_mm", "Amplitude P95-P5 mm vs plan XZ"),
-    ("AMP_p95p5_MP_mm_shoulderscale", "AMP_p95p5_VYZ_mm", "Amplitude P95-P5 mm vs plan YZ"),
+    ("QOM_WRIST_MPnormcoord_norm", "QOM_WRIST_V3D25_norm", "QoM poignets - coordonnees normalisees MediaPipe"),
+    ("QOM_WRIST_MP_norm", "QOM_WRIST_V3D100_norm", "QoM poignets - Vicon a 100 Hz"),
+    ("QOM_HEAD_MPnormcoord_norm", "QOM_HEAD_tempmid_V3D25_norm", "QoM tete - coordonnees normalisees MediaPipe"),
+    ("AMP_maxmin_MP_norm", "AMP_maxmin_V3D_norm", "Amplitude max-min"),
+    ("AMP_p95p5_MP_norm", "AMP_p95p5_V3D_norm", "Amplitude - plans XY/XZ/YZ : voir T_planes"),
 ]
 main = pd.DataFrame([validity(df, *a) for a in MAIN]); main.to_csv(OUT / "T_main_validity.csv", index=False)
-sens = pd.DataFrame([validity(df, *a, boot=False) for a in SENS]); sens.to_csv(OUT / "T_sensitivity.csv", index=False)
+img = pd.DataFrame([validity(dfc, *a) for a in IMG]); img.to_csv(OUT / "T_image_plane_validity.csv", index=False)
+sens = pd.DataFrame([validity(df, *a, boot=False) for a in SENS[:-1]]); sens.to_csv(OUT / "T_sensitivity.csv", index=False)
+# plans du laboratoire (approche frequente) : amplitude en mm (echelle epaule) vs Vicon projete sur chaque plan
+pl = pd.DataFrame([validity(df, "AMP_p95p5_MP_mm_shoulderscale", f"AMP_p95p5_V{p}_mm", f"Amplitude mm vs plan {p}", boot=False)
+                   for p in ["XY", "XZ", "YZ"]]); pl.to_csv(OUT / "T_planes.csv", index=False)
 cond_rows, mixed = [], []
 for a in MAIN:
     rws, mx = by_condition(df, *a); cond_rows += rws; mixed.append(mx)
@@ -104,9 +115,12 @@ pd.DataFrame(cond_rows).to_csv(OUT / "T_by_condition.csv", index=False)
 pd.DataFrame(mixed).to_csv(OUT / "T_rmcorr_mixed.csv", index=False)
 
 # descriptives par condition
-desc_cols = {"QOM_WRIST_MP_px": "QoM poignet MP (px)", "QOM_WRIST_VIC_px": "QoM poignet Vicon proj. (px)",
+desc_cols = {"QOM_WRIST_MP_norm": "QoM poignets MP (larg. epaule)", "QOM_WRIST_V3D25_norm": "QoM poignets Vicon 3D (larg. epaule)",
+             "QOM_HEAD_MP_norm": "QoM tete MP (larg. epaule)", "QOM_HEAD_tempmid_V3D25_norm": "QoM tete Vicon 3D (larg. epaule)",
+             "AMP_p95p5_MP_norm": "Amplitude MP (larg. epaule)", "AMP_p95p5_V3D_norm": "Amplitude Vicon 3D (larg. epaule)",
+             "QOM_WRIST_MP_px": "QoM poignet MP (px)", "QOM_WRIST_VIC_px": "QoM poignet Vicon proj. (px)",
              "QOM_WRIST_V3D25_norm": "QoM poignet Vicon 3D (larg. epaule)", "QOM_WRIST_MP_norm": "QoM poignet MP (larg. epaule)",
-             "QOM_HEAD_MP_px": "QoM tete MP (px)", "QOM_HEAD_VIC_px": "QoM tete Vicon nez virtuel (px)",
+             "QOM_HEAD_MP_px": "QoM tete MP (px)", 
              "QOM_HEAD_tempmid_VIC_px": "QoM tete Vicon tempes (px)",
              "AMP_p95p5_MP_px": "Amplitude MP (px)", "AMP_p95p5_VIC_px": "Amplitude Vicon proj. (px)",
              "AMP_p95p5_V3D_mm": "Amplitude Vicon 3D (mm)", "sw_mp_px_med": "Largeur epaule MP (px)",
@@ -125,7 +139,7 @@ pd.DataFrame(rows).to_csv(OUT / "T_descriptives.csv", index=False)
 rows = []
 for _, r in df.iterrows():
     for s in "DG":
-        base = dict(dyad=r.dyad, condition=r.condition, pid=r.pid, side=s, near=(s == r.near_side),
+        base = dict(dyad=r.dyad, condition=r.condition, pid=r.pid, side=s, near=(s == r.near_side), calib_ok=r.calib_ok,
                     vis_ok_pct=r[f"vis_ok_pct_{s}"])
         for ref in ["V3D", "VIC"]:
             for pre in ["MP", "MPvis"]:
@@ -155,7 +169,8 @@ def elbow_summary(g, pre, ref):
 es = []
 for lab, g in [("Bras proche", el[el.near]), ("Bras eloigne", el[~el.near]), ("Tous", el)]:
     for pre, ref in [("MP", "V3D"), ("MP", "VIC"), ("MPvis", "V3D"), ("MPnorm", "V3D"), ("VIC", "V3D")]:
-        es.append(dict(arm=lab, comparison=f"{pre} vs {ref}", **elbow_summary(g, pre, ref)))
+        gg = g[g.calib_ok] if "VIC" in (pre + ref) else g  # references projetees : calibrations valides
+        es.append(dict(arm=lab, comparison=f"{pre} vs {ref}", **elbow_summary(gg, pre, ref)))
     for pl in ["XY", "XZ", "YZ"]:
         es.append(dict(arm=lab, comparison=f"MP vs plan {pl}", n=len(g), r_fisher=fz(g[f"MP_{pl}_r"]),
                        r_median=g[f"MP_{pl}_r"].median()))
@@ -167,8 +182,8 @@ pd.DataFrame(ec).to_csv(OUT / "T_elbow_by_condition.csv", index=False)
 
 # ---------------- divers chiffres
 from scipy import stats
-rel_bias = 100 * (df.QOM_WRIST_MP_px - df.QOM_WRIST_VIC_px) / df.QOM_WRIST_VIC_px
-rel_bias_h = 100 * (df.QOM_HEAD_MP_px - df.QOM_HEAD_tempmid_VIC_px) / df.QOM_HEAD_tempmid_VIC_px
+rel_bias = 100 * (df.QOM_WRIST_MP_norm - df.QOM_WRIST_V3D25_norm) / df.QOM_WRIST_V3D25_norm
+rel_bias_h = 100 * (df.QOM_HEAD_MP_norm - df.QOM_HEAD_tempmid_V3D25_norm) / df.QOM_HEAD_tempmid_V3D25_norm
 key = dict(
     n_rec=len(df), fps_counts=df.fps.round(2).value_counts().to_dict(),
     res_counts=(df.W.astype(int).astype(str) + "x" + df.H.astype(int).astype(str)).value_counts().to_dict(),
@@ -193,7 +208,6 @@ key = dict(
     qomwin_wrist_q3=df.QOMwin_WRIST_r.quantile(.75),
     qomwin_head_median=df.QOMwin_HEAD_tempmid_r.median(), qomwin_head_q1=df.QOMwin_HEAD_tempmid_r.quantile(.25),
     qomwin_head_q3=df.QOMwin_HEAD_tempmid_r.quantile(.75),
-    qomwin_headnose_median=df.QOMwin_HEAD_r.median(),
     jitter_wrist_median_px=df.MP_jitter_WRIST_px.median(),
     jitter_vs_relbias_r=stats.pearsonr(df.MP_jitter_WRIST_px, rel_bias)[0],
     jitter_vs_relbias_p=stats.pearsonr(df.MP_jitter_WRIST_px, rel_bias)[1],
@@ -201,7 +215,6 @@ key = dict(
     jitter_vs_relbias_spearman_p=stats.spearmanr(df.MP_jitter_WRIST_px, rel_bias)[1],
     head_relbias_median=rel_bias_h.median(),
     vicon_labelfix_recordings=int((df.vicon_labelfix_frames > 0).sum()),
-    head_all4_pct_median=df.head_all4_pct.median(), head_all4_pct_min=df.head_all4_pct.min(),
     near_side_D=int((df.near_side == "D").sum()),
     holdout_near_wrist_median=np.nanmedian([r[f"reproj_holdout_{'RIGHT' if r.near_side=='D' else 'LEFT'}_WRIST_px"] for _, r in df.iterrows()]),
     holdout_far_wrist_median=np.nanmedian([r[f"reproj_holdout_{'LEFT' if r.near_side=='D' else 'RIGHT'}_WRIST_px"] for _, r in df.iterrows()]),
@@ -222,8 +235,16 @@ def perm(d, mp, ref):
             ys[g] = y[RNG.permutation(g)]
         c += np.corrcoef(x, ys)[0, 1] >= r0
     return (c + 1) / (NBOOT + 1)
-key["perm_p_wrist"] = perm(df, "QOM_WRIST_MP_px", "QOM_WRIST_VIC_px")
-key["perm_p_head"] = perm(df, "QOM_HEAD_MP_px", "QOM_HEAD_tempmid_VIC_px")
+key["perm_p_wrist"] = perm(df, "QOM_WRIST_MP_norm", "QOM_WRIST_V3D25_norm")
+key["perm_p_head"] = perm(df, "QOM_HEAD_MP_norm", "QOM_HEAD_tempmid_V3D25_norm")
+key["calib_failures"] = df.loc[~df.calib_ok, ["dyad", "condition", "pid", "camera_model", "calib_ratio"]].round(2).values.tolist()
+key["calib_ratio_median"] = df.calib_ratio.median()
+key["calib_ratio_max_ok"] = df.loc[df.calib_ok, "calib_ratio"].max()
+key["lag_minus_wristlag_abs_median"] = (df.lag_s - df.lag_xcorr_s).abs().median()
+key["lag_minus_wristlag_abs_max"] = (df.lag_s - df.lag_xcorr_s).abs().max()
+key["head_peak_min"] = df.head_peak.min(); key["head_peak_median"] = df.head_peak.median()
+key["head_vs_wrist_sync_rawdiff_median"] = (df.lag_head_xcorr_s - df.lag_xcorr_s).abs().median()
+key["head_ratio_lt1_pct"] = 100 * float((df.QOM_HEAD_MP_norm < df.QOM_HEAD_tempmid_V3D25_norm).mean())
 json.dump({k: (float(v) if isinstance(v, (np.floating, float, np.integer)) else v) for k, v in key.items()},
           open(OUT / "key_numbers.json", "w"), indent=1, default=str)
 print(main[["label", "n", "r", "ICC", "ICC_lo", "ICC_hi", "ICC_boot_lo", "ICC_boot_hi", "bias_pct", "ratio_gmean", "ratio_LoA_lo", "ratio_LoA_hi", "BA_slope_p"]].round(3).to_string())

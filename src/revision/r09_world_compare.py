@@ -48,8 +48,12 @@ fz = lambda v: float(np.tanh(np.nanmean(np.arctanh(np.clip(v, -.999, .999)))))
 summ = []
 for arm in ["near", "far"]:
     for ref in ["ELB3D", "ELB2Dpx"]:
-        summ.append(dict(variable=f"coude {arm} {ref}", n=len(d), r_fisher=fz(d[f"{ref}_{arm}_r"]),
-                         rmse_median=d[f"{ref}_{arm}_rmse"].median(), bias_mean=d[f"{ref}_{arm}_bias"].mean(),
+        rr = d[f"{ref}_{arm}_r"].to_numpy(); rm = d[f"{ref}_{arm}_rmse"].to_numpy()
+        rng = np.random.default_rng(42); bs = [rng.integers(0, len(d), len(d)) for _ in range(2000)]
+        rb = [fz(rr[i]) for i in bs]; mb = [np.nanmedian(rm[i]) for i in bs]
+        summ.append(dict(variable=f"coude {arm} {ref}", n=len(d), r_fisher=fz(rr), r_lo=np.percentile(rb, 2.5),
+                         r_hi=np.percentile(rb, 97.5), rmse_median=np.nanmedian(rm), rmse_lo=np.percentile(mb, 2.5),
+                         rmse_hi=np.percentile(mb, 97.5), bias_mean=d[f"{ref}_{arm}_bias"].mean(),
                          sdd_mean=d[f"{ref}_{arm}_sdd"].mean()))
 def icc21(x, y):
     Y = np.c_[x, y]; n, k = Y.shape; gm = Y.mean()

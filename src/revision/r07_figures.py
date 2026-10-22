@@ -10,13 +10,22 @@ ROOT = Path(__file__).resolve().parents[2]
 REV = ROOT / "data/intermediate/revision"; OUT = ROOT / "data/final/revision"
 FIG = OUT / "figures"; FIG.mkdir(parents=True, exist_ok=True)
 df = pd.read_csv(REV / "r04_all_recordings.csv")
+for k in ["p95p5", "maxmin"]:
+    df[f"AMP_{k}_MP_norm"] = df[f"AMP_{k}_MP_px"] / df.sw_mp_px_med
+    df[f"AMP_{k}_V3D_norm"] = df[f"AMP_{k}_V3D_mm"] / df.sw3_med_mm
+df["calib_ok"] = (df.AMP_p95p5_VIC_px / (df.AMP_p95p5_V3D_mm * df.px_per_mm)) <= 3
+DF_ALL = df
 key = json.load(open(OUT / "key_numbers.json"))
 plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 10, "axes.spines.top": False,
                      "axes.spines.right": False, "axes.titlesize": 11, "axes.titleweight": "bold"})
 COND = {"SEATED": ("Assis", "#3b6ea8"), "SEMI": ("Semi-debout", "#d08a2e"), "STANDING": ("Debout", "#4f9d69")}
 
 
-def scatter_ba(ax1, ax2, mp, ref, xlabel, ylabel, unit, title):
+def scatter_ba(ax1, ax2, mp, ref, xlabel, ylabel, unit, title, data=None):
+    global df
+    df_save = df
+    if data is not None:
+        df = data
     for c, (lab, col) in COND.items():
         g = df[df.condition == c]
         ax1.scatter(g[ref], g[mp], s=22, alpha=.8, color=col, edgecolor="white", linewidth=.4, label=lab)
@@ -41,6 +50,7 @@ def scatter_ba(ax1, ax2, mp, ref, xlabel, ylabel, unit, title):
                          arrowprops=dict(arrowstyle="-|>", color="0.3", lw=.6))
     ax2.set_xscale("log"); ax2.set_xlabel(f"Moyenne géométrique des deux systèmes ({unit})")
     ax2.set_ylabel("Écart MediaPipe / Vicon (%)"); ax2.set_title("Bland-Altman (log-ratio)", loc="left")
+    df = df_save
 
 
 # Figure 1 : dispositif (vue de dessus, valeurs mesurees)
@@ -66,14 +76,28 @@ ax.set_aspect("equal"); ax.axis("off"); ax.set_xlim(-1.5, D + 1.5); ax.set_ylim(
 ax.set_title("Dispositif vu de dessus (angles mesurés par calibration)", loc="center", fontsize=10)
 fig.tight_layout(); fig.savefig(FIG / "fig1_dispositif.png", dpi=300); plt.close(fig)
 
-# Figures 2-4 : QoM poignet, QoM tete, amplitude
-for fname, mp, ref, unit, title in [
-        ("fig2_qom_poignet.png", "QOM_WRIST_MP_px", "QOM_WRIST_VIC_px", "px", "QoM poignets"),
-        ("fig3_qom_tete.png", "QOM_HEAD_MP_px", "QOM_HEAD_tempmid_VIC_px", "px", "QoM tête (nez MP vs milieu des tempes)"),
-        ("fig4_amplitude.png", "AMP_p95p5_MP_px", "AMP_p95p5_VIC_px", "px", "Amplitude des poignets (P95–P5)")]:
+# Figures 2-4 : comparaisons principales, SANS calibration (normalisees par la largeur d'epaule)
+for fname, mp, ref, title in [
+        ("fig2_qom_poignet.png", "QOM_WRIST_MP_norm", "QOM_WRIST_V3D25_norm", "QoM poignets"),
+        ("fig3_qom_tete.png", "QOM_HEAD_MP_norm", "QOM_HEAD_tempmid_V3D25_norm", "QoM tête (nez MP vs milieu des tempes)"),
+        ("fig4_amplitude.png", "AMP_p95p5_MP_norm", "AMP_p95p5_V3D_norm", "Amplitude des poignets (P95–P5)")]:
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(9, 3.8))
-    scatter_ba(a1, a2, mp, ref, f"Vicon projeté ({unit})", f"MediaPipe ({unit})", unit, title)
+    scatter_ba(a1, a2, mp, ref, "Vicon 3D (largeurs d'épaule)", "MediaPipe 2D (largeurs d'épaule)", "larg. d'épaule", title)
     fig.tight_layout(); fig.savefig(FIG / fname, dpi=300); plt.close(fig)
+# Figure S3 : comparaisons dans le plan image (calibrations valides)
+fig, axs = plt.subplots(1, 3, figsize=(11, 3.6))
+for ax, mp, ref, title in [(axs[0], "QOM_WRIST_MP_px", "QOM_WRIST_VIC_px", "QoM poignets"),
+                           (axs[1], "QOM_HEAD_MP_px", "QOM_HEAD_tempmid_VIC_px", "QoM tête"),
+                           (axs[2], "AMP_p95p5_MP_px", "AMP_p95p5_VIC_px", "Amplitude poignets")]:
+    g = df[df.calib_ok]
+    for c, (lab, col) in COND.items():
+        h = g[g.condition == c]
+        ax.scatter(h[ref], h[mp], s=16, alpha=.8, color=col, edgecolor="white", linewidth=.3, label=lab)
+    lim = [0, max(g[mp].max(), g[ref].max()) * 1.05]
+    ax.plot(lim, lim, "--", color="0.4", lw=1); ax.set_xlim(lim); ax.set_ylim(lim)
+    ax.set_xlabel("Vicon projeté (px)"); ax.set_ylabel("MediaPipe (px)"); ax.set_title(title, loc="left")
+axs[0].legend(frameon=False, fontsize=8)
+fig.tight_layout(); fig.savefig(FIG / "figS3_plan_image.png", dpi=300); plt.close(fig)
 
 # Figure 5 : angle du coude, bras proche vs eloigne
 el = pd.read_csv(OUT / "elbow_per_recording_side.csv")
@@ -94,7 +118,7 @@ a1.set_title("Angle du coude : MediaPipe 2D vs Vicon 3D", loc="left")
 fig.tight_layout(); fig.savefig(FIG / "fig5_coude_proche_eloigne.png", dpi=300); plt.close(fig)
 
 # Figure 6 : serie temporelle (bras proche droit, enregistrement median)
-cand = el[(el.near) & (el.side == "D")].copy()
+cand = el[(el.near) & (el.side == "D") & (el.calib_ok)].copy()
 med = cand.MP_V3D_r.median(); row = cand.iloc[(cand.MP_V3D_r - med).abs().argmin()]
 ts = np.load(REV / f"timeseries/{row.dyad}_{row.condition}_{row.pid}.npz")
 t = ts["t"] - ts["t"][0]
@@ -108,33 +132,10 @@ fig.tight_layout(); fig.savefig(FIG / "fig6_coude_serie.png", dpi=300); plt.clos
 json.dump(dict(dyad=row.dyad, condition=row.condition, pid=row.pid, r=row.MP_V3D_r, rmse=row.MP_V3D_rmse,
                r_vic=row.MP_VIC_r), open(OUT / "fig6_example.json", "w"))
 
-# Figure 7 : coordination interpersonnelle
-co = pd.read_csv(OUT / "coordination_indices.csv"); real = co[co.kind == "real"]; ps = co[co.kind == "pseudo"]
-fig, axs = plt.subplots(1, 3, figsize=(11, 3.6))
-for ax, sig, lab in [(axs[0], "wrist", "Poignets"), (axs[1], "head", "Tête")]:
-    for c, (cl, col) in COND.items():
-        g = real[real.condition == c]
-        ax.scatter(g[f"{sig}_VIC"], g[f"{sig}_MP"], s=22, color=col, alpha=.8, edgecolor="white", linewidth=.4, label=cl)
-    lo = min(real[[f"{sig}_VIC", f"{sig}_MP"]].min()) - .01; hi = max(real[[f"{sig}_VIC", f"{sig}_MP"]].max()) + .01
-    ax.plot([lo, hi], [lo, hi], ls="--", color="0.4", lw=1); ax.set_xlim(lo, hi); ax.set_ylim(lo, hi)
-    ax.set_xlabel("Indice de coordination – Vicon projeté"); ax.set_ylabel("Indice – MediaPipe"); ax.set_title(lab, loc="left")
-axs[0].legend(frameon=False, fontsize=8)
-ax = axs[2]; pos = 0; ticks = []
-for sig, lab in [("head", "Tête"), ("wrist", "Poignets")]:
-    for sysn, col in [("MP", "#3b6ea8"), ("VIC", "0.5"), ("V3D", "#b5523b")]:
-        for kind, dd, alpha in [("réel", real, .9), ("pseudo", ps, .35)]:
-            v = dd[f"{sig}_{sysn}"]
-            ax.errorbar(pos, v.mean(), yerr=1.96 * v.std(ddof=1) / np.sqrt(len(v)), fmt="o", color=col, alpha=alpha, ms=5, capsize=2)
-            pos += .35
-        ticks.append((pos - .52, f"{lab}\n{sysn}")); pos += .3
-ax.set_xticks([p for p, _ in ticks]); ax.set_xticklabels([l for _, l in ticks], fontsize=7)
-ax.set_ylabel("Indice moyen (IC 95 %)"); ax.set_title("Réelles (foncé) vs pseudo-dyades (clair)", loc="left", fontsize=9)
-fig.tight_layout(); fig.savefig(FIG / "fig7_coordination.png", dpi=300); plt.close(fig)
-
 # Figure S1 : effet de la correction des coordonnees normalisees
 fig, axs = plt.subplots(1, 2, figsize=(9, 3.8))
-for ax, mp, ref, ttl in [(axs[0], "QOM_WRIST_MPnormcoord_norm", "QOM_WRIST_V3D100_norm", "Avant : coordonnées normalisées"),
-                         (axs[1], "QOM_WRIST_MP_norm", "QOM_WRIST_V3D100_norm", "Après : pixels")]:
+for ax, mp, ref, ttl in [(axs[0], "QOM_WRIST_MPnormcoord_norm", "QOM_WRIST_V3D25_norm", "Coordonnées normalisées"),
+                         (axs[1], "QOM_WRIST_MP_norm", "QOM_WRIST_V3D25_norm", "Pixels")]:
     ax.scatter(df[ref], df[mp], s=18, color="#3b6ea8", alpha=.7)
     lim = [0, max(df["QOM_WRIST_MPnormcoord_norm"].max(), df[ref].max()) * 1.05]
     ax.plot(lim, lim, "--", color="0.4", lw=1); ax.set_xlim(lim); ax.set_ylim(lim)

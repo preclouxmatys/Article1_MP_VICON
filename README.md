@@ -157,28 +157,29 @@ regression, and dyad-cluster bootstrap confidence intervals) are in
 
 Matys Precloux — PhD candidate, EuroMov, University of Montpellier.
 
-## Revision pipeline (October 2026) — `src/revision/`
+## Analysis pipeline — `src/revision/`
 
-Following the supervisor's review, the analysis was audited and re-run with a revised
-pipeline (the original scripts are left untouched for traceability). Main corrections:
+Run order (from `src/revision/`):
+`r01_prepare_arrays.py` → `r01b_extra_markers.py` → `r02_audit.py` → `r02b_head_sync.py` →
+`r03_match_check.py` (optional) → `r04_process.py` → `r05_stats.py` → `r07_figures.py` →
+`r08_world_landmarks.py <recordings>` → `r09_world_compare.py` → `r10_residual_analysis.py`.
+(`r06*` = interpersonal coordination, kept for a separate article — see `docs/IDEE_ARTICLE2_coordination.md`.)
 
-- **Pixel coordinates**: MediaPipe normalized coordinates are anisotropic (x/width, y/height)
-  and videos have different crops (652–1280 × 714–720, 6 portrait 1080×1920). All distances
-  and angles are now computed in pixels. This alone changed wrist QoM bias from +28 % to ≈ −4 %.
-- **Frame mapping**: `_pose.xlsx` files only contain detected frames; mapping now uses the
-  `frame` column (video frame number) instead of the row index.
-- **Synchronization**: no common trigger existed. Per-recording lag estimated by wrist-speed
-  cross-correlation, refined by minimizing camera reprojection error (median |lag| 0.17 s, max 7.4 s).
-- **File swap**: D14 SEMI videos P1/P2 are swapped (handled in `VIDEO_SWAP`).
-- **Vicon export formats**: D13–D15 have a 4-line header ("Field #"); reader made robust.
-- **Camera calibration**: DLT (or affine model when unstable) per recording from shoulders +
-  ankles (+ hips/knees when present); arms held out. Vicon projected into the image plane.
-- **Head**: Vicon temple midpoint and a rigid-body "virtual nose" both reported.
-- **New analyses**: near vs far arm, world landmarks (20-recording subset), windowed QoM,
-  interpersonal coordination (windowed cross-correlation, real vs pseudo dyads).
+Key methodological choices:
+- **Pixel coordinates**: MediaPipe normalized coordinates (x/width, y/height) are converted to pixels
+  before any distance or angle computation.
+- **Frame mapping** on the video frame number (`frame` column), not the row index.
+- **Synchronization** (no common trigger): lag estimated by cross-correlation of HEAD speed
+  (MediaPipe nose vs Vicon temple midpoint), refined by reprojection of shoulders/ankles. Arms are never
+  used to synchronize arm analyses; head time-series analyses use the wrist-based lag. Both agree (median 0.04 s).
+- **Primary comparison (no calibration)**: MediaPipe 2D (px / MediaPipe shoulder width in px) vs Vicon 3D
+  (mm / Vicon shoulder width in mm). No MediaPipe data enters the reference.
+- **Secondary comparison (image plane)**: per-recording camera calibration (DLT, or affine model when
+  unstable) from shoulders + ankles; Vicon projected into the image. Calibration QC independent of
+  MediaPipe (projected / 3D-scaled amplitude ratio > 3 = failure; 5 recordings excluded from image-plane analyses).
+  Calibration also gives camera orientation and near/far arm classification.
+- **File swap**: D14 SEMI videos P1/P2 swapped (`VIDEO_SWAP`). Vicon export formats differ for D13–D15 (handled).
+- Filtering: 4th-order zero-lag Butterworth 6 Hz (Winter residual analysis: Vicon ≈ 6 Hz; MediaPipe ≈ 4 Hz).
 
-Run order (from `src/revision/`): `r01_prepare_arrays.py` → `r02_audit.py` → `r03_match_check.py`
-(optional) → `r04_process.py` → `r05_stats.py` → `r06_coordination.py` → `r06b_coordination_stats.py`
-→ `r07_figures.py` → `r08_world_landmarks.py <recordings>` → `r09_world_compare.py`.
 Extra Python packages: `pingouin`, `statsmodels`, `matplotlib`, `python-calamine`.
 Outputs: `data/final/revision/` (tables, figures, `key_numbers.json`).
