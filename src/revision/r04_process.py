@@ -17,7 +17,9 @@ les problemes identifies par l'audit (r02/r03) :
     Les analyses temporelles de la tete utilisent le decalage estime sur les poignets.
  5. Calibration camera (DLT, 11 parametres) par enregistrement, a partir des
     correspondances marqueurs Vicon <-> reperes MediaPipe du TRONC et des
-    JAMBES uniquement (epaules, hanches, genoux, chevilles). Les bras (coudes,
+    JAMBES uniquement : epaules et chevilles (hanches et genoux seulement pour
+    D01 SEATED, seuls enregistrements ou ces marqueurs existent ; ailleurs ils
+    sont absents (NaN) et ignores). Les bras (coudes,
     poignets) ne servent PAS a la calibration : ils sont donc evalues sur des
     points independants. Le Vicon est ensuite projete dans le vrai plan image.
  6. Vicon : inversions breves de labels detectees (longueur d'avant-bras ou de
@@ -213,7 +215,7 @@ def process(dyad, cond, pid, audit):
 
     # ---- synchro : la correlation croisee des poignets (r02) n'est conservee qu'a titre
     # de controle ; le decalage est estime UNIQUEMENT a partir des points de calibration
-    # (epaules, chevilles, orteils), sans aucun point des bras ni de la tete.
+    # (epaules, chevilles), sans aucun point des bras ni de la tete.
     # Decalage principal : correlation croisee sur la TETE (r02b), independante des bras ;
     # affine ensuite par reprojection des points de calibration (tronc, pieds).
     # Le decalage estime sur les POIGNETS (r02) sert pour les analyses temporelles de la tete.
