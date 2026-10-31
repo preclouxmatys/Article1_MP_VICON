@@ -8,3 +8,10 @@ data/intermediate/
 venv/
 __pycache__/
 *.pyc
+# Documents de rédaction et fichiers locaux (hors pipeline)
+Claude outputs/
+_scratch_to_delete/
+.RData
+.Rhistory
+.gitignore.save
+**/.DS_Store
