@@ -1,20 +1,21 @@
 """
-r02_audit.py : audit qualite des donnees brutes, par enregistrement.
-  - Vicon : % de NaN et plus long trou par marqueur du bras ; vitesses
-    aberrantes (sauts / inversions de labels) ; distance poignet-centre des
-    epaules hors plage physiologique.
-  - Synchronisation : decalage temporel MP <-> Vicon estime par correlation
-    croisee des vitesses de poignet (gauche + droite), +/- 20 s.
-  - Lateralite : correlation vitesse RIGHT_WRIST (MP) avec poignet_D vs poignet_G.
-Sortie : data/intermediate/revision/r02_audit.csv
+r02_audit.py: quality check of the raw data, per recording.
+  - Vicon: % of missing samples and longest gap per arm marker; aberrant
+    speeds (jumps / label swaps); wrist-to-shoulder-centre distance outside
+    the physiological range.
+  - Synchronisation: MediaPipe <-> Vicon time lag estimated by cross-correlation
+    of wrist speeds (left + right), +/- 20 s. This wrist-based lag is used for
+    the head time-series analyses.
+  - Laterality: correlation of MediaPipe RIGHT_WRIST speed with Vicon right vs left wrist.
+Output: data/intermediate/pipeline/r02_audit.csv
 """
 from pathlib import Path
 import numpy as np, pandas as pd
 from scipy.signal import butter, filtfilt
 
 ROOT = Path(__file__).resolve().parents[2]
-ARR = ROOT / "data/intermediate/revision/arrays"
-OUT = ROOT / "data/intermediate/revision/r02_audit.csv"
+ARR = ROOT / "data/intermediate/pipeline/arrays"
+OUT = ROOT / "data/intermediate/pipeline/r02_audit.csv"
 
 
 def fill(x):
@@ -70,7 +71,7 @@ for f in sorted(ARR.glob("*.npz")):
         r[f"upperarm_{s}_med"], r[f"upperarm_{s}_iqr"] = np.median(ua), np.subtract(*np.percentile(ua, [75, 25]))
     sw = np.linalg.norm(V["epaule_D"] - V["epaule_G"], axis=1)
     r["sw_med"], r["sw_p5"], r["sw_p95"] = np.median(sw), np.percentile(sw, 5), np.percentile(sw, 95)
-    # --- synchro : vitesse poignets Vicon reechantillonnee aux instants video
+    # --- synchronisation: Vicon wrist speed resampled at the video frame times
     fps = float(d["fps"]); nv = int(d["n_video"])
     t_vid = np.arange(nv) / fps
     t_vic = np.arange(int(d["n_vicon"])) / 100.0
@@ -90,7 +91,7 @@ for f in sorted(ARR.glob("*.npz")):
     k = int(np.argmax(vals)); best = (float(vals[k]), int(lags[k]))
     c0 = np.corrcoef(a, b)[0, 1]
     r["xcorr_lag_frames"], r["xcorr_lag_s"], r["xcorr_peak"], r["xcorr_at0"] = best[1], best[1] / fps, best[0], c0
-    # --- lateralite
+    # --- laterality
     for sm in "DG":
         for sv in "DG":
             x, y = sp_m[sm][:n], np.nan_to_num(sp_v[sv][:n])

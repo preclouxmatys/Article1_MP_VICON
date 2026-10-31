@@ -1,32 +1,31 @@
 """
-r04_process.py  (pipeline de revision)
+r04_process.py
 
-Traitement complet d'un enregistrement (participant x condition), en corrigeant
-les problemes identifies par l'audit (r02/r03) :
+Full processing of one recording (participant x condition):
 
- 1. Coordonnees MediaPipe converties en PIXELS (x*W, y*H) avant tout calcul
-    de distance ou d'angle (les coordonnees normalisees sont anisotropes, et
-    les videos ont des recadrages differents : 840x720 ... 1280x720, 1080x1920).
- 2. Timeline video complete (images non detectees = NaN, interpolees si <= 5
-    images), et appariement sur le NUMERO d'image (et non l'indice de ligne).
- 3. Inversion de fichiers corrigee : en D14 SEMI, la video etiquetee P1 est
-    celle de P2 et inversement (verifie par correlation croisee, r = .96).
- 4. Synchronisation : decalage MP<->Vicon estime par correlation croisee des
-    vitesses de la TETE (r02b ; nez MP vs milieu des tempes Vicon), puis affine
-    en minimisant l'erreur de reprojection des epaules et chevilles (cf. 5).
-    Les analyses temporelles de la tete utilisent le decalage estime sur les poignets.
- 5. Calibration camera (DLT, 11 parametres) par enregistrement, a partir des
-    correspondances marqueurs Vicon <-> reperes MediaPipe du TRONC et des
-    JAMBES uniquement : epaules et chevilles (hanches et genoux seulement pour
-    D01 SEATED, seuls enregistrements ou ces marqueurs existent ; ailleurs ils
-    sont absents (NaN) et ignores). Les bras (coudes,
-    poignets) ne servent PAS a la calibration : ils sont donc evalues sur des
-    points independants. Le Vicon est ensuite projete dans le vrai plan image.
- 6. Vicon : inversions breves de labels detectees (longueur d'avant-bras ou de
-    bras aberrante) -> NaN puis interpolation ; filtre Butterworth 6 Hz.
- 7. Tete : point unique = milieu des deux marqueurs des tempes (Vicon), compare
-    au repere du nez (MediaPipe).
-Sorties : ligne de resultats (dict) + series temporelles (npz).
+ 1. MediaPipe coordinates are converted to PIXELS (x*W, y*H) before any distance
+    or angle is computed (normalised coordinates are anisotropic, and the videos
+    have different crops: 840x720 ... 1280x720, 1080x1920).
+ 2. Full video timeline (frames without detection = NaN, interpolated if <= 5
+    frames); MediaPipe and Vicon are matched by video FRAME NUMBER.
+ 3. File swap: for D14 SEMI, the video labelled P1 is that of P2 and vice versa
+    (checked by cross-correlation with r03, r = .96).
+ 4. Synchronisation: MediaPipe <-> Vicon lag estimated by cross-correlation of
+    HEAD speed (r02b; MediaPipe nose vs Vicon temple midpoint), then refined by
+    minimising the reprojection error of shoulders and ankles (see 5).
+    Head time-series analyses use the lag estimated on the wrists (r02).
+ 5. Camera calibration (DLT, 11 parameters, or affine model when the projective
+    model is unstable), per recording, from Vicon markers <-> MediaPipe landmarks
+    of the TRUNK and LEGS only: shoulders and ankles (hips and knees only for
+    D01 SEATED, the only recordings where these markers exist; elsewhere they are
+    missing (NaN) and ignored). The arms (elbows, wrists) are NOT used for the
+    calibration. The Vicon markers are then projected into the image plane.
+ 6. Vicon: brief label swaps detected (aberrant upper-arm or forearm length)
+    -> NaN then interpolation; Butterworth low-pass filter, 6 Hz.
+ 7. Head: single point = midpoint of the two Vicon temple markers, compared
+    with the MediaPipe nose landmark.
+Outputs: one result line per recording (JSON) + time series (npz).
+Usage: python r04_process.py [recording prefixes] [--force]
 """
 from pathlib import Path
 import sys, json
@@ -35,28 +34,28 @@ from scipy.signal import butter, filtfilt
 from scipy.optimize import least_squares
 
 ROOT = Path(__file__).resolve().parents[2]
-ARR = ROOT / "data/intermediate/revision/arrays"
-TS = ROOT / "data/intermediate/revision/timeseries"; TS.mkdir(parents=True, exist_ok=True)
-RES = ROOT / "data/intermediate/revision/per_recording"; RES.mkdir(parents=True, exist_ok=True)
-AUDIT = ROOT / "data/intermediate/revision/r02_audit.csv"
-HEADSYNC = ROOT / "data/intermediate/revision/r02b_head_sync.csv"
+ARR = ROOT / "data/intermediate/pipeline/arrays"
+TS = ROOT / "data/intermediate/pipeline/timeseries"; TS.mkdir(parents=True, exist_ok=True)
+RES = ROOT / "data/intermediate/pipeline/per_recording"; RES.mkdir(parents=True, exist_ok=True)
+AUDIT = ROOT / "data/intermediate/pipeline/r02_audit.csv"
+HEADSYNC = ROOT / "data/intermediate/pipeline/r02b_head_sync.csv"
 FC, ORDER, FSV = 6.0, 4, 100.0
 VIDEO_SWAP = {("D14", "SEMI"): {"P1": "P2", "P2": "P1"}}
 CALIB = [("epaule_D", "RIGHT_SHOULDER"), ("epaule_G", "LEFT_SHOULDER"), ("hanche_D", "RIGHT_HIP"),
          ("hanche_G", "LEFT_HIP"), ("genou_D", "RIGHT_KNEE"), ("genou_G", "LEFT_KNEE"),
          ("cheville_D", "RIGHT_ANKLE"), ("cheville_G", "LEFT_ANKLE")]
-# Note : l'ajout des orteils (orteil_D/G <-> FOOT_INDEX) a ete teste et degrade la
-# calibration (pieds hors champ ou mal detectes dans les videos recadrees) ; non retenu.
+# Toe markers (FOOT_INDEX) are not used: feet were often out of frame or poorly
+# detected in the cropped videos.
 ARM = [("coude_D", "RIGHT_ELBOW"), ("coude_G", "LEFT_ELBOW"), ("poignet_D", "RIGHT_WRIST"), ("poignet_G", "LEFT_WRIST")]
 
 
-# ---------------------------------------------------------------- utilitaires
+# ---------------------------------------------------------------- utilities
 def interp_nan(x, maxgap=None):
     df = pd.DataFrame(x)
     if maxgap is None:
         return df.interpolate(limit_direction="both").to_numpy()
     out = df.interpolate(limit_direction="both", limit=maxgap, limit_area=None).to_numpy()
-    # remettre NaN dans les trous plus longs que maxgap
+    # put NaN back in gaps longer than maxgap
     isn = np.isnan(np.asarray(x, float)).any(axis=1) if np.ndim(x) > 1 else np.isnan(x)
     run = np.zeros(len(isn), int); c = 0
     for i, v in enumerate(isn):
@@ -147,13 +146,13 @@ def dlt_refine(P, X, u):
 
 
 def affine_fit(X, u):
-    """Camera affine (8 parametres) : u = A X + b. Utilisee quand la DLT
-    projective est instable (singularite w ~ 0), cas frequent ici car le
-    participant occupe une faible profondeur a ~3-4 m de la camera."""
+    """Affine camera (8 parameters): u = A X + b. Used when the projective DLT
+    is unstable (singularity w ~ 0), which is frequent here because the
+    participant occupies a small depth at ~3-4 m from the camera."""
     m = np.isfinite(X).all(1) & np.isfinite(u).all(1)
     Xh = np.c_[X[m], np.ones(m.sum())]
     sol = np.linalg.lstsq(Xh, u[m], rcond=None)[0]  # (4, 2)
-    for _ in range(3):  # IRLS robuste (Huber-like)
+    for _ in range(3):  # robust IRLS (Huber-like)
         e = np.linalg.norm(Xh @ sol - u[m], axis=1)
         w = 1 / np.maximum(e, 10.0)
         sol = np.linalg.lstsq(Xh * w[:, None], u[m] * w[:, None], rcond=None)[0]
@@ -165,24 +164,23 @@ def camera_center(P):
     return -np.linalg.inv(P[:, :3]) @ P[:, 3]
 
 
-# ---------------------------------------------------------------- tete
-# ---------------------------------------------------------------- Vicon nettoyage
+# ---------------------------------------------------------------- Vicon cleaning
 def clean_segments(V):
-    """Detecte les inversions breves de labels : longueur bras/avant-bras
-    s'ecartant de plus de 25 % de sa mediane -> NaN pour le marqueur distal."""
+    """Detects brief label swaps: upper-arm or forearm length deviating by more
+    than 25 % from its median -> NaN for the distal marker."""
     n_bad = 0
     for s in "DG":
         for prox, dist in [(f"epaule_{s}", f"coude_{s}"), (f"coude_{s}", f"poignet_{s}")]:
             L = np.linalg.norm(V[dist] - V[prox], axis=1)
             med = np.nanmedian(L)
             bad = np.abs(L - med) > 0.25 * med
-            # dilatation de 5 images de part et d'autre
+            # dilation of 5 frames on each side
             bad = np.convolve(bad.astype(int), np.ones(11), "same") > 0
             V[dist][bad] = np.nan; n_bad += int(bad.sum())
     return n_bad
 
 
-# ---------------------------------------------------------------- principal
+# ---------------------------------------------------------------- main processing
 def process(dyad, cond, pid, audit):
     dv = np.load(ARR / f"{dyad}_{cond}_{pid}.npz")
     pid_vid = VIDEO_SWAP.get((dyad, cond), {}).get(pid, pid)
@@ -198,9 +196,6 @@ def process(dyad, cond, pid, audit):
         return MP[:, names.index(nm), 3]
 
     V = {k[2:]: dv[k].astype(float).copy() for k in dv.files if k.startswith("V_")}
-    ex = ARR.parent / "arrays_extra" / f"{dyad}_{cond}_{pid}.npz"
-    if ex.exists():
-        de = np.load(ex); V.update({k[2:]: de[k].astype(float).copy() for k in de.files})
     n_bad = clean_segments(V)
     nvic = int(dv["n_vicon"]); tv = np.arange(nvic) / FSV
     Vf = {}
@@ -210,15 +205,13 @@ def process(dyad, cond, pid, audit):
         Vf[k] = lowpass(interp_nan(a, maxgap=200), FSV)
     Vf["tempmid"] = (Vf["Tempe_D"] + Vf["Tempe_G"]) / 2
 
-    # MediaPipe filtre (pixels)
+    # filtered MediaPipe landmarks (pixels)
     M = {nm: lowpass(mp(nm), fps) for nm in set([b for _, b in CALIB + ARM] + ["NOSE"])}
 
-    # ---- synchro : la correlation croisee des poignets (r02) n'est conservee qu'a titre
-    # de controle ; le decalage est estime UNIQUEMENT a partir des points de calibration
-    # (epaules, chevilles), sans aucun point des bras ni de la tete.
-    # Decalage principal : correlation croisee sur la TETE (r02b), independante des bras ;
-    # affine ensuite par reprojection des points de calibration (tronc, pieds).
-    # Le decalage estime sur les POIGNETS (r02) sert pour les analyses temporelles de la tete.
+    # ---- synchronisation
+    # Main lag: cross-correlation of HEAD speed (r02b), independent of the arms,
+    # then refined by reprojection of the calibration points (shoulders, ankles).
+    # The lag estimated on the WRISTS (r02) is used for the head time-series analyses.
     a = audit.set_index(["dyad", "condition", "pid"])
     row = a.loc[(dyad, cond, pid)]
     peak = float(row.xcorr_peak) if (dyad, cond) not in VIDEO_SWAP else np.nan
@@ -252,7 +245,7 @@ def process(dyad, cond, pid, audit):
         if best is None or e < best[0]:
             best = (e, l2, P)
     lag = best[1]
-    # decalage pour la tete : meme affinage, centre sur l'estimation 'poignets' si fiable
+    # lag for the head: same refinement, centred on the wrist-based estimate when reliable
     lag_for_head = lag + ((lag_xcorr - lag_head) if (np.isfinite(lag_xcorr) and peak >= 0.6) else 0.0)
     X, u = calib_data(lag)
     P_proj = dlt_refine(best[2], X, u)
@@ -273,14 +266,14 @@ def process(dyad, cond, pid, audit):
     VV = vic_at(lag, keys)
     proj = {k: project(P, VV[k]) for k in keys}
 
-    # erreur de reprojection sur points NON utilises (bras)
+    # reprojection error on points NOT used for the calibration (arms)
     err_arm = {}
     for v, m in ARM:
         e = np.linalg.norm(proj[v] - M[m], axis=1); e = e[np.isfinite(e) & (vis(m) > 0.5)]
         err_arm[m] = float(np.median(e)) if e.size else np.nan
 
-    # geometrie camera : direction de visee (robuste meme si la DLT est quasi
-    # affine, ce qui rend la position 3D du centre optique mal determinee)
+    # camera geometry: viewing direction (robust even when the DLT is almost
+    # affine, which leaves the 3D position of the optical centre poorly defined)
     shC3 = np.nanmedian((Vf["epaule_D"] + Vf["epaule_G"]) / 2, 0)
     if use_proj and np.median(np.c_[X, np.ones(len(X))] @ P[2]) < 0:
         P = -P
@@ -288,9 +281,9 @@ def process(dyad, cond, pid, audit):
     p0 = (P[:2] @ np.r_[shC3, 1.0]) / w0
     J = (P[:2, :3] - np.outer(p0, P[2, :3])) / w0
     nview = np.linalg.svd(J)[2][-1]
-    # sens : chaque camera est placee derriere le partenaire (dispositif), donc du
-    # cote vers lequel le participant est tourne. Avant du participant = perpendiculaire
-    # a la ligne des epaules, orientee vers le partenaire (Vicon uniquement).
+    # sign: each camera is placed behind the partner (set-up), i.e. on the side the
+    # participant faces. Participant's front = perpendicular to the shoulder line,
+    # oriented towards the partner (Vicon data only).
     partner_ = "P2" if pid == "P1" else "P1"
     dp_ = np.load(ARR / f"{dyad}_{cond}_{partner_}.npz")
     pC_ = np.nanmedian((dp_["V_epaule_D"] + dp_["V_epaule_G"]) / 2, 0)
@@ -299,7 +292,7 @@ def process(dyad, cond, pid, audit):
     if np.dot(fwd_[:2], (pC_ - shC3)[:2]) < 0:
         fwd_ = -fwd_
     if nview @ fwd_ < 0:
-        nview = -nview  # vecteur unitaire du participant vers la camera
+        nview = -nview  # unit vector from the participant towards the camera
     partner = "P2" if pid == "P1" else "P1"
     dp = np.load(ARR / f"{dyad}_{cond}_{partner}.npz")
     pC = np.nanmedian((dp["V_epaule_D"] + dp["V_epaule_G"]) / 2, 0)
@@ -323,7 +316,7 @@ def process(dyad, cond, pid, audit):
                vicon_labelfix_frames=n_bad, **geo,
                **{f"reproj_holdout_{m}_px": e for m, e in err_arm.items()})
 
-    # échelle px/mm locale : largeur d'epaule projetee vs 3D
+    # local px/mm scale: projected vs 3D shoulder width
     sw3 = np.linalg.norm(VV["epaule_D"] - VV["epaule_G"], axis=1)
     sw_mp_px = np.linalg.norm(M["RIGHT_SHOULDER"] - M["LEFT_SHOULDER"], axis=1)
     sw_vic_px = np.linalg.norm(proj["epaule_D"] - proj["epaule_G"], axis=1)
@@ -331,7 +324,7 @@ def process(dyad, cond, pid, audit):
                sw_vicproj_px_med=float(np.nanmedian(sw_vic_px)),
                sw_mp_norm_med=float(np.nanmedian(np.linalg.norm(
                    (MP[:, names.index("RIGHT_SHOULDER"), :2] - MP[:, names.index("LEFT_SHOULDER"), :2]), axis=1))))
-    # pixels par mm a la profondeur du participant (pour exprimer des erreurs en mm)
+    # pixels per mm at the participant's depth (used by the calibration check)
     px_per_mm = np.nanmedian(sw_vic_px / sw3)
     out["px_per_mm"] = float(px_per_mm)
 
@@ -341,31 +334,31 @@ def process(dyad, cond, pid, audit):
     projh = {"tempmid": project(P, VVh["tempmid"])}
     for lbl, vk, mk in [("WRIST", ["poignet_D", "poignet_G"], ["RIGHT_WRIST", "LEFT_WRIST"]),
                         ("HEAD", ["tempmid"], ["NOSE"])]:
-        # (a) Vicon 3D a 100 Hz / largeur d'epaule 3D (controle de l'effet de cadence)
+        # (a) Vicon 3D at 100 Hz / 3D shoulder width (sampling-rate check)
         out[f"QOM_{lbl}_V3D100_norm"] = sum(path_length(Vf[k]) for k in vk) / np.nanmedian(
             np.linalg.norm(Vf["epaule_D"] - Vf["epaule_G"], axis=1))
-        # (b) Vicon 3D re-echantillonne a la cadence video (25 Hz), synchronise
+        # (b) Vicon 3D resampled at the video frame rate, synchronised
         out[f"QOM_{lbl}_V3D25_norm"] = sum(path_length(VV[k]) for k in vk) / np.nanmedian(sw3)
-        # (c) Vicon projete dans l'image (px) et MediaPipe (px)
+        # (c) Vicon projected into the image (px) and MediaPipe (px)
         out[f"QOM_{lbl}_VIC_px"] = sum(path_length(proj[k]) for k in vk)
         out[f"QOM_{lbl}_MP_px"] = sum(path_length(M[m]) for m in mk)
-        # (d) normalises par la largeur d'epaule (px) de chaque systeme
+        # (d) divided by each system's shoulder width (px)
         out[f"QOM_{lbl}_VIC_norm"] = out[f"QOM_{lbl}_VIC_px"] / np.nanmedian(sw_vic_px)
         out[f"QOM_{lbl}_MP_norm"] = out[f"QOM_{lbl}_MP_px"] / np.nanmedian(sw_mp_px)
-        # (e) MediaPipe en coordonnees normalisees (analyse de sensibilite)
+        # (e) MediaPipe in normalised coordinates (sensitivity analysis)
         raw = sum(path_length(lowpass(mp(m, px=False), fps)) for m in mk)
         out[f"QOM_{lbl}_MPnormcoord_norm"] = raw / out["sw_mp_norm_med"]
-        # QoM fenetre (1 s) : correlation des series temporelles
-        srcp = proj if lbl == "WRIST" else projh  # tete : decalage estime sur les poignets
+        # windowed QoM (1 s): correlation of the time series
+        srcp = proj if lbl == "WRIST" else projh  # head: lag estimated on the wrists
         sv = sum(step(srcp[k]) for k in vk); sm = sum(step(M[m]) for m in mk)
         nw = len(sv) // win
         qv = np.nansum(sv[:nw * win].reshape(nw, win), 1); qm = np.nansum(sm[:nw * win].reshape(nw, win), 1)
         g = agree(qm, qv)
         out[f"QOMwin_{lbl}_r"] = g["r"]
-        # bruit MediaPipe : pas inter-images quand le Vicon projete est quasi immobile
+        # MediaPipe noise: frame-to-frame step when the projected Vicon is almost still
         still = sv < np.nanpercentile(sv, 10)
         out[f"MP_jitter_{lbl}_px"] = float(np.nanmedian(sm[still]))
-    # QoM tete : milieu des tempes (definition principale)
+    # head QoM: temple midpoint (main definition)
     out["QOM_HEAD_tempmid_V3D100_norm"] = path_length(Vf["tempmid"]) / np.nanmedian(
         np.linalg.norm(Vf["epaule_D"] - Vf["epaule_G"], axis=1))
     out["QOM_HEAD_tempmid_VIC_px"] = path_length(proj["tempmid"])
@@ -375,22 +368,22 @@ def process(dyad, cond, pid, audit):
     out["QOMwin_HEAD_tempmid_r"] = agree(np.nansum(sm[:nw * win].reshape(nw, win), 1),
                                          np.nansum(sv[:nw * win].reshape(nw, win), 1))["r"]
 
-    # ------------------------------------------------ amplitude poignet
+    # ------------------------------------------------ wrist amplitude
     Cm = (M["RIGHT_SHOULDER"] + M["LEFT_SHOULDER"]) / 2
     Cv = (proj["epaule_D"] + proj["epaule_G"]) / 2
     C3 = (VV["epaule_D"] + VV["epaule_G"]) / 2
-    scale_old = out["sw3_med_mm"] / out["sw_mp_px_med"]
+    shoulder_scale = out["sw3_med_mm"] / out["sw_mp_px_med"]  # mm per MediaPipe pixel (shoulder width)
     for kind in ["p95p5", "maxmin"]:
         j = 0 if kind == "p95p5" else 1
         out[f"AMP_{kind}_MP_px"] = sum(amp_robust(np.linalg.norm(M[m] - Cm, axis=1))[j] for m in ["RIGHT_WRIST", "LEFT_WRIST"])
         out[f"AMP_{kind}_VIC_px"] = sum(amp_robust(np.linalg.norm(proj[k] - Cv, axis=1))[j] for k in ["poignet_D", "poignet_G"])
         out[f"AMP_{kind}_V3D_mm"] = sum(amp_robust(np.linalg.norm(VV[k] - C3, axis=1))[j] for k in ["poignet_D", "poignet_G"])
-        out[f"AMP_{kind}_MP_mm_shoulderscale"] = out[f"AMP_{kind}_MP_px"] * scale_old
+        out[f"AMP_{kind}_MP_mm_shoulderscale"] = out[f"AMP_{kind}_MP_px"] * shoulder_scale
         for pl, ix in {"XY": [0, 1], "XZ": [0, 2], "YZ": [1, 2]}.items():
             out[f"AMP_{kind}_V{pl}_mm"] = sum(amp_robust(np.linalg.norm(VV[k][:, ix] - C3[:, ix], axis=1))[j]
                                               for k in ["poignet_D", "poignet_G"])
 
-    # ------------------------------------------------ angle du coude
+    # ------------------------------------------------ elbow angle
     for s, side in [("D", "RIGHT"), ("G", "LEFT")]:
         a_mp = angle(M[f"{side}_SHOULDER"], M[f"{side}_ELBOW"], M[f"{side}_WRIST"])
         a_mpn = angle(*[lowpass(mp(f"{side}_{j}", px=False), fps) for j in ["SHOULDER", "ELBOW", "WRIST"]])
@@ -417,7 +410,7 @@ def process(dyad, cond, pid, audit):
         if s == "D":
             ts_elb = dict(elb_mp=a_mp, elb_vic=a_vic, elb_v3=a_v3)
 
-    # ------------------------------------------------ series temporelles (temps Vicon, cadence video)
+    # ------------------------------------------------ time series (Vicon time, video frame rate)
     t_vic = (np.arange(nvid) + lag) / fps
     np.savez_compressed(TS / f"{dyad}_{cond}_{pid}.npz", t=t_vic, fps=fps,
                         wrist_mp=sum(step(M[m]) for m in ["RIGHT_WRIST", "LEFT_WRIST"]),

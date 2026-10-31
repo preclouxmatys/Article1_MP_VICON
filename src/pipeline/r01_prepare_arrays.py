@@ -1,17 +1,16 @@
 """
-r01_prepare_arrays.py  (pipeline de revision, oct. 2026)
+r01_prepare_arrays.py
 
-Convertit chaque enregistrement en un fichier .npz compact :
-  - Vicon : tous les marqueurs utiles de P1 et P2 (mm, 100 Hz, NaN = trou)
-  - MediaPipe : 33 landmarks (x, y normalises, z, visibilite) sur la timeline
-    COMPLETE de la video (une ligne par image video, NaN quand MediaPipe n'a
-    rien detecte), + largeur/hauteur de l'image et fps de la video.
+Converts each recording (participant x condition) into one compact .npz file:
+  - Vicon: all markers of interest (mm, 100 Hz, NaN = gap)
+  - MediaPipe: 33 landmarks (normalised x, y, z, visibility) on the FULL video
+    timeline (one row per video frame, NaN when no pose was detected), plus
+    image width/height and video frame rate.
 
-Correction par rapport a la pipeline d'origine : le fichier _pose.xlsx ne
-contient que les images ou une pose a ete detectee ; les images manquantes
-etaient donc silencieusement supprimees, et l'appariement MP->Vicon se faisait
-sur l'indice de LIGNE au lieu du numero d'IMAGE. Ici on repositionne chaque
-ligne sur son numero d'image (colonne 'frame').
+The _pose.xlsx files only contain frames in which a pose was detected. Each row
+is therefore placed back on its video frame number ('frame' column), so that
+MediaPipe and Vicon are matched by frame number and not by row index.
+Requires ffprobe (FFmpeg) to read video metadata.
 """
 import csv, re, subprocess, json
 from pathlib import Path
@@ -21,20 +20,20 @@ ROOT = Path(__file__).resolve().parents[2]
 VICON = ROOT / "data/raw/vicon_csv"
 VIDEOS = ROOT / "data/raw/videos"
 POSE = ROOT / "data/intermediate/mediapipe_pose"
-OUT = ROOT / "data/intermediate/revision/arrays"
+OUT = ROOT / "data/intermediate/pipeline/arrays"
 OUT.mkdir(parents=True, exist_ok=True)
 CONDS = ["SEATED", "SEMI", "STANDING"]
 MARKERS = ["Tempe_D", "Tempe_G", "AR_Tete_D", "AR_Tete_G", "epaule_D", "epaule_G",
            "coude_D", "coude_G", "poignet_D", "poignet_G", "majeur_D", "majeur_G",
            "entre_homoplate", "hanche_D", "hanche_G", "genou_D", "genou_G",
            "cheville_D", "cheville_G"]
-P2_ALIAS = {"Tempe_G": "Temps_G"}  # coquille dans les CSV bruts pour P2
+P2_ALIAS = {"Tempe_G": "Temps_G"}  # marker label typo in the raw CSV files for P2
 
 
 def read_vicon(path):
-    """Lecteur robuste aux deux formats d'export Vicon presents dans les donnees
-    (5 lignes d'en-tete 'Frame, Sub Frame' + ligne d'unites, ou 4 lignes
-    'Field #' sans Sub Frame ni unites : dyades 13 a 15)."""
+    """Reads both Vicon CSV export formats present in the data
+    (5 header lines 'Frame, Sub Frame' + a units line, or 4 header lines
+    'Field #' without Sub Frame or units: dyads 13 to 15)."""
     with open(path, encoding="utf-8", errors="replace", newline="") as f:
         rd = csv.reader(f)
         rows = [next(rd) for _ in range(6)]
@@ -92,7 +91,7 @@ def main():
                 try:
                     np.load(out)["MP"]; continue
                 except Exception:
-                    pass  # fichier incomplet (ecriture interrompue) : on le regenere
+                    pass  # incomplete file (interrupted write): regenerate it
             pre = "" if pid == "P1" else "2"
             vic = {}
             for m in MARKERS:
@@ -104,7 +103,7 @@ def main():
             vids = list((VIDEOS / dyad / pid / cond).glob("*.mp4"))
             poses = list((POSE / dyad / pid / cond).glob("*_pose.xlsx"))
             if len(vids) != 1 or len(poses) != 1:
-                log.append(f"{dyad} {cond} {pid}: video/pose introuvable"); continue
+                log.append(f"{dyad} {cond} {pid}: video/pose file not found"); continue
             W, H, fps, nb, rot = video_meta(vids[0])
             dp = pd.read_excel(poses[0], engine="calamine")
             n = int(max(nb, dp["frame"].max() + 1))

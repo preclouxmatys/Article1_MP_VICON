@@ -1,7 +1,8 @@
 """
-r05_stats.py : statistiques de validite (pipeline de revision).
-Entree : data/intermediate/revision/r04_all_recordings.csv (une ligne par enregistrement)
-Sorties : data/final/revision/*.csv (tableaux) ; chiffres cles en JSON.
+r05_stats.py: agreement statistics.
+Input  : data/intermediate/pipeline/per_recording/*.json (one file per recording, from r04)
+Outputs: data/results/*.csv (tables), data/results/per_recording_results.csv
+         (one line per recording) and data/results/key_numbers.json.
 """
 from pathlib import Path
 import json, glob
@@ -10,20 +11,21 @@ import pingouin as pg
 import statsmodels.formula.api as smf
 
 ROOT = Path(__file__).resolve().parents[2]
-REV = ROOT / "data/intermediate/revision"
-OUT = ROOT / "data/final/revision"; OUT.mkdir(parents=True, exist_ok=True)
+REV = ROOT / "data/intermediate/pipeline"
+OUT = ROOT / "data/results"; OUT.mkdir(parents=True, exist_ok=True)
 RNG = np.random.default_rng(42); NBOOT = 5000
 
 df = pd.DataFrame([json.load(open(f)) for f in sorted(glob.glob(str(REV / "per_recording/*.json")))])
 df.to_csv(REV / "r04_all_recordings.csv", index=False)
+df.to_csv(OUT / "per_recording_results.csv", index=False)
 df["subject"] = df.dyad + "_" + df.pid
-# Amplitude normalisee par la largeur d'epaule propre a chaque systeme (sans calibration)
+# Amplitude divided by each system's own shoulder width (no calibration)
 for k in ["p95p5", "maxmin"]:
     df[f"AMP_{k}_MP_norm"] = df[f"AMP_{k}_MP_px"] / df.sw_mp_px_med
     df[f"AMP_{k}_V3D_norm"] = df[f"AMP_{k}_V3D_mm"] / df.sw3_med_mm
-# Controle qualite de la calibration, independant de MediaPipe : une projection ne peut
-# pas allonger un segment ; rapport amplitude projetee / (amplitude 3D x echelle) ~1,3
-# normalement (raccourcissement de la largeur d'epaule en vue oblique). > 3 = echec.
+# Calibration quality check, independent of MediaPipe: a projection cannot lengthen a
+# segment; ratio projected amplitude / (3D amplitude x scale) is ~1.3 normally
+# (foreshortened shoulder width in an oblique view). > 3 = failed calibration.
 df["calib_ratio"] = df.AMP_p95p5_VIC_px / (df.AMP_p95p5_V3D_mm * df.px_per_mm)
 df["calib_ok"] = df.calib_ratio <= 3
 dfc = df[df.calib_ok].copy()
@@ -49,7 +51,7 @@ def validity(d, mp, ref, label, boot=True):
     mean_s = (x + y) / 2
     slope = np.polyfit(mean_s, dd, 1)[0]
     from scipy import stats
-    # biais proportionnel teste sur l'echelle log (coherent avec le Bland-Altman en log-ratio)
+    # proportional bias tested on the log scale (consistent with the log-ratio Bland-Altman)
     sl = stats.linregress(np.log(np.sqrt(x * y)), lr) if np.isfinite(lr).all() else stats.linregress(mean_s, dd)
     out = dict(label=label, n=n, mean_MP=x.mean(), sd_MP=x.std(ddof=1), mean_ref=mref, sd_ref=y.std(ddof=1),
                r=r, r_lo=np.tanh(z - 1.96 * se), r_hi=np.tanh(z + 1.96 * se), R2=r ** 2,
@@ -85,17 +87,17 @@ def by_condition(d, mp, ref, label):
                       mixed_slope_hi=m.conf_int().loc[ref, 1], mixed_p=m.pvalues[ref])
 
 
-MAIN = [  # comparaisons principales : SANS calibration (MediaPipe 2D normalise vs Vicon 3D normalise)
+MAIN = [  # main comparisons, WITHOUT calibration (MediaPipe 2D vs Vicon 3D, both in shoulder widths)
     ("QOM_WRIST_MP_norm", "QOM_WRIST_V3D25_norm", "QoM poignets"),
     ("QOM_HEAD_MP_norm", "QOM_HEAD_tempmid_V3D25_norm", "QoM tete"),
     ("AMP_p95p5_MP_norm", "AMP_p95p5_V3D_norm", "Amplitude poignets"),
 ]
-IMG = [  # comparaisons secondaires dans le plan image (Vicon projete), calibrations valides
+IMG = [  # image-plane comparisons (projected Vicon), valid calibrations only
     ("QOM_WRIST_MP_px", "QOM_WRIST_VIC_px", "QoM poignets (plan image)"),
     ("QOM_HEAD_MP_px", "QOM_HEAD_tempmid_VIC_px", "QoM tete (plan image)"),
     ("AMP_p95p5_MP_px", "AMP_p95p5_VIC_px", "Amplitude poignets (plan image)"),
 ]
-SENS = [
+SENS = [  # sensitivity analyses (Table S1)
     ("QOM_WRIST_MPnormcoord_norm", "QOM_WRIST_V3D25_norm", "QoM poignets - coordonnees normalisees MediaPipe"),
     ("QOM_WRIST_MP_norm", "QOM_WRIST_V3D100_norm", "QoM poignets - Vicon a 100 Hz"),
     ("QOM_HEAD_MPnormcoord_norm", "QOM_HEAD_tempmid_V3D25_norm", "QoM tete - coordonnees normalisees MediaPipe"),
@@ -105,7 +107,7 @@ SENS = [
 main = pd.DataFrame([validity(df, *a) for a in MAIN]); main.to_csv(OUT / "T_main_validity.csv", index=False)
 img = pd.DataFrame([validity(dfc, *a) for a in IMG]); img.to_csv(OUT / "T_image_plane_validity.csv", index=False)
 sens = pd.DataFrame([validity(df, *a, boot=False) for a in SENS[:-1]]); sens.to_csv(OUT / "T_sensitivity.csv", index=False)
-# plans du laboratoire (approche frequente) : amplitude en mm (echelle epaule) vs Vicon projete sur chaque plan
+# laboratory planes (common approach): amplitude in mm (shoulder scale) vs Vicon projected on each plane
 pl = pd.DataFrame([validity(df, "AMP_p95p5_MP_mm_shoulderscale", f"AMP_p95p5_V{p}_mm", f"Amplitude mm vs plan {p}", boot=False)
                    for p in ["XY", "XZ", "YZ"]]); pl.to_csv(OUT / "T_planes.csv", index=False)
 cond_rows, mixed = [], []
@@ -114,7 +116,7 @@ for a in MAIN:
 pd.DataFrame(cond_rows).to_csv(OUT / "T_by_condition.csv", index=False)
 pd.DataFrame(mixed).to_csv(OUT / "T_rmcorr_mixed.csv", index=False)
 
-# descriptives par condition
+# descriptive statistics per condition
 desc_cols = {"QOM_WRIST_MP_norm": "QoM poignets MP (larg. epaule)", "QOM_WRIST_V3D25_norm": "QoM poignets Vicon 3D (larg. epaule)",
              "QOM_HEAD_MP_norm": "QoM tete MP (larg. epaule)", "QOM_HEAD_tempmid_V3D25_norm": "QoM tete Vicon 3D (larg. epaule)",
              "AMP_p95p5_MP_norm": "Amplitude MP (larg. epaule)", "AMP_p95p5_V3D_norm": "Amplitude Vicon 3D (larg. epaule)",
@@ -125,8 +127,6 @@ desc_cols = {"QOM_WRIST_MP_norm": "QoM poignets MP (larg. epaule)", "QOM_WRIST_V
              "AMP_p95p5_MP_px": "Amplitude MP (px)", "AMP_p95p5_VIC_px": "Amplitude Vicon proj. (px)",
              "AMP_p95p5_V3D_mm": "Amplitude Vicon 3D (mm)", "sw_mp_px_med": "Largeur epaule MP (px)",
              "sw3_med_mm": "Largeur epaule Vicon (mm)", "px_per_mm": "Echelle (px/mm)"}
-desc = df.groupby("condition")[list(desc_cols)].agg(["mean", "std"])
-alld = df[list(desc_cols)].agg(["mean", "std"]).T.unstack() if False else None
 rows = []
 for c in desc_cols:
     row = {"variable": desc_cols[c]}
@@ -135,7 +135,7 @@ for c in desc_cols:
     row["Total"] = f"{df[c].mean():.1f} ({df[c].std():.1f})"; rows.append(row)
 pd.DataFrame(rows).to_csv(OUT / "T_descriptives.csv", index=False)
 
-# ---------------- angle du coude
+# ---------------- elbow angle
 rows = []
 for _, r in df.iterrows():
     for s in "DG":
@@ -169,7 +169,7 @@ def elbow_summary(g, pre, ref):
 es = []
 for lab, g in [("Bras proche", el[el.near]), ("Bras eloigne", el[~el.near]), ("Tous", el)]:
     for pre, ref in [("MP", "V3D"), ("MP", "VIC"), ("MPvis", "V3D"), ("MPnorm", "V3D"), ("VIC", "V3D")]:
-        gg = g[g.calib_ok] if "VIC" in (pre + ref) else g  # references projetees : calibrations valides
+        gg = g[g.calib_ok] if "VIC" in (pre + ref) else g  # projected references: valid calibrations only
         es.append(dict(arm=lab, comparison=f"{pre} vs {ref}", **elbow_summary(gg, pre, ref)))
     for pl in ["XY", "XZ", "YZ"]:
         es.append(dict(arm=lab, comparison=f"MP vs plan {pl}", n=len(g), r_fisher=fz(g[f"MP_{pl}_r"]),
@@ -180,7 +180,7 @@ for (c, nr), g in el.groupby(["condition", "near"]):
     ec.append(dict(condition=c, arm="proche" if nr else "eloigne", **elbow_summary(g, "MP", "V3D")))
 pd.DataFrame(ec).to_csv(OUT / "T_elbow_by_condition.csv", index=False)
 
-# ---------------- divers chiffres
+# ---------------- other numbers reported in the text
 from scipy import stats
 rel_bias = 100 * (df.QOM_WRIST_MP_norm - df.QOM_WRIST_V3D25_norm) / df.QOM_WRIST_V3D25_norm
 rel_bias_h = 100 * (df.QOM_HEAD_MP_norm - df.QOM_HEAD_tempmid_V3D25_norm) / df.QOM_HEAD_tempmid_V3D25_norm
@@ -225,7 +225,7 @@ key = dict(
 audit = pd.read_csv(REV / "r02_audit.csv")
 key["mp_detect_pct_min"] = audit.mp_detect_pct.min(); key["mp_detect_pct_mean"] = audit.mp_detect_pct.mean()
 key["vicon_nan_arm_max_pct"] = float(audit.filter(like="nanpct_poignet").max().max())
-# permutation (supplementaire) : P1/P2 echanges au sein de chaque dyade x condition
+# permutation test (supplementary): P1/P2 swapped within each dyad x condition
 def perm(d, mp, ref):
     x = d[mp].to_numpy(); y = d[ref].to_numpy(); r0 = np.corrcoef(x, y)[0, 1]
     gi = list(d.groupby(["dyad", "condition"]).indices.values()); c = 0

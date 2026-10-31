@@ -1,11 +1,12 @@
-"""r03_match_check.py : pour les enregistrements dont la synchro echoue, cherche
-quel enregistrement Vicon (meme dyade, toutes conditions, P1/P2) correspond
-le mieux a la video MediaPipe (correlation croisee des vitesses de poignet)."""
+"""r03_match_check.py: for recordings whose synchronisation fails, finds which Vicon
+recording (same dyad, all conditions, P1/P2) best matches the MediaPipe video
+(cross-correlation of wrist speeds). Prints the 3 best matches.
+Usage: python r03_match_check.py D14_SEMI_P1 [...]   (--all: search all dyads)"""
 from pathlib import Path
 import numpy as np, pandas as pd, sys
 from scipy.signal import butter, filtfilt
 ROOT = Path(__file__).resolve().parents[2]
-ARR = ROOT / "data/intermediate/revision/arrays"
+ARR = ROOT / "data/intermediate/pipeline/arrays"
 def fill(x): return pd.DataFrame(x).interpolate(limit_direction="both").to_numpy()
 def lp(x, fs): b, a = butter(4, 6/(fs/2)); return filtfilt(b, a, x, axis=0)
 def spd(p, fs): v = np.linalg.norm(np.diff(p, axis=0), axis=1)*fs; return np.r_[v, v[-1]]

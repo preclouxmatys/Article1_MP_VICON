@@ -1,11 +1,12 @@
-"""r02b_head_sync.py : decalage MP <-> Vicon estime sur la TETE (vitesse du nez
-MediaPipe vs vitesse du milieu des tempes Vicon), independant des bras. Sert a
-synchroniser les analyses des bras ; le decalage 'poignets' (r02) sert pour la tete."""
+"""r02b_head_sync.py: MediaPipe <-> Vicon time lag estimated on the HEAD (speed of
+the MediaPipe nose vs speed of the Vicon temple midpoint), independent of the arms.
+Used to synchronise the arm analyses; the wrist-based lag (r02) is used for the head.
+SWAP: the two partners' videos are swapped for D14 SEMI (detected with r03)."""
 from pathlib import Path
 import numpy as np, pandas as pd
 from scipy.signal import butter, filtfilt
 ROOT = Path(__file__).resolve().parents[2]
-ARR = ROOT / "data/intermediate/revision/arrays"
+ARR = ROOT / "data/intermediate/pipeline/arrays"
 SWAP = {("D14", "SEMI"): {"P1": "P2", "P2": "P1"}}
 def fill(x): return pd.DataFrame(x).interpolate(limit_direction="both").to_numpy()
 def lp(x, fs): b, a = butter(4, 6 / (fs / 2)); return filtfilt(b, a, x, axis=0)
@@ -27,4 +28,4 @@ for f in sorted(ARR.glob("*.npz")):
     sv = np.interp(t, tv, spd(lp(tm, 100.0), 100.0), right=np.nan)
     pk, lg = xc(np.nan_to_num(sv), sm, int(20 * fps))
     rows.append(dict(dyad=dy, condition=co, pid=pi, head_lag_frames=lg, head_lag_s=lg / fps, head_peak=pk))
-pd.DataFrame(rows).to_csv(ROOT / "data/intermediate/revision/r02b_head_sync.csv", index=False)
+pd.DataFrame(rows).to_csv(ROOT / "data/intermediate/pipeline/r02b_head_sync.csv", index=False)

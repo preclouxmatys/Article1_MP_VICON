@@ -1,14 +1,15 @@
-"""r09_world_compare.py : MediaPipe world landmarks (3D, metres, origine au
-centre des hanches) vs Vicon 3D, sur le sous-echantillon de 20 enregistrements.
-Variables directement comparables en 3D et en unites metriques :
-  - angle du coude 3D (bras proche / eloigne de la camera)
-  - amplitude poignet P95-P5 (distance poignet - centre des epaules, mm)
-  - QoM des poignets relative au centre des hanches (mm ; la translation
-    globale du corps est absente des world landmarks par construction)"""
+"""r08_world_compare.py: MediaPipe world landmarks (3D, metres, origin at the
+hip centre) vs Vicon 3D, on the 20-recording subsample.
+Variables directly comparable in 3D and in metric units:
+  - 3D elbow angle (arm near / far from the camera)
+  - wrist amplitude P95-P5 (wrist to shoulder-centre distance, mm)
+  - wrist QoM relative to the shoulder centre (mm; the global translation of
+    the body is absent from the world landmarks by construction)
+Run from src/pipeline (imports r04_process)."""
 from pathlib import Path
 import json, numpy as np, pandas as pd
 import r04_process as R
-ROOT = Path(__file__).resolve().parents[2]; REV = ROOT / "data/intermediate/revision"; OUT = ROOT / "data/final/revision"
+ROOT = Path(__file__).resolve().parents[2]; REV = ROOT / "data/intermediate/pipeline"; OUT = ROOT / "data/results"
 NAMES = [l.name for l in __import__("mediapipe").solutions.pose.PoseLandmark]
 rows = []
 for f in sorted((REV / "world").glob("D??_*_P?.npz")):
@@ -36,7 +37,7 @@ for f in sorted((REV / "world").glob("D??_*_P?.npz")):
     Cm = (mpw("RIGHT_SHOULDER") + mpw("LEFT_SHOULDER")) / 2; Cv = (vic("epaule_D") + vic("epaule_G")) / 2
     out["AMP_world_mm"] = sum(R.amp_robust(np.linalg.norm(mpw(f"{w}_WRIST") - Cm, axis=1))[0] for w in ["RIGHT", "LEFT"])
     out["AMP_V3D_mm"] = sum(R.amp_robust(np.linalg.norm(vic(f"poignet_{s}") - Cv, axis=1))[0] for s in "DG")
-    Hv = Cv  # centre des epaules (hanches absentes de la plupart des enregistrements Vicon)
+    Hv = Cv  # shoulder centre (no hip markers in most Vicon recordings)
     out["QOM_world_mm"] = sum(R.path_length(mpw(f"{w}_WRIST") - Cm) for w in ["RIGHT", "LEFT"])
     out["QOM_V3D_relhip_mm"] = sum(R.path_length(vic(f"poignet_{s}") - Hv) for s in "DG")
     out["QOM_MP_px"] = js["QOM_WRIST_MP_px"]; out["QOM_VIC_px"] = js["QOM_WRIST_VIC_px"]

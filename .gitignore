@@ -1,33 +1,14 @@
+# Participant data are never versioned (identifiable data, ethics approval CER-UM)
 data/raw/
 data/intermediate/
 *.mp4
 *.mov
 *.avi
 *.csv
-.DS_Store
-venv/
+!data/results/*.csv
+
+# Python and system files
 __pycache__/
 *.pyc
-# Documents de rédaction et fichiers locaux (hors pipeline)
-Claude outputs/
-_scratch_to_delete/
-.RData
-.Rhistory
-.gitignore.save
-**/.DS_Store
-
-# Ancienne pipeline, tests et sauvegardes (hors article)
-src/0[2-8]_*
-src/02b_*
-src/revision/r06*
-src/revision/*_backup.py
-*.bak_*
-docs/
-data/final/*.xlsx
-data/final/figures/
-
-# Tableaux de résultats de l'article (versionnés), sauf coordination
-!data/final/revision/*.csv
-data/final/revision/T_coordination_*.csv
-data/final/revision/coordination_indices.csv
-data/final/revision/figures/fig7_coordination.png
+venv/
+.DS_Store

@@ -1,11 +1,11 @@
 """
 01_mediapipe_extract_landmarks.py
 
-Extrait les landmarks MediaPipe Pose (33 points) pour chaque vidéo brute,
-frame par frame, et sauvegarde un fichier Excel par vidéo.
+Extracts the 33 MediaPipe Pose landmarks from each raw video, frame by frame,
+and saves one Excel file per video.
 
-Entrée  : config.VIDEO_DIR (vidéos brutes, organisées par dyade/participant/condition)
-Sortie  : data/intermediate/mediapipe_pose/<mêmes sous-dossiers>/<nom>_pose.xlsx
+Input  : config.VIDEO_DIR (raw videos, organised by dyad / participant / condition)
+Output : data/intermediate/mediapipe_pose/<same subfolders>/<name>_pose.xlsx
 """
 
 import cv2
@@ -17,14 +17,14 @@ from tqdm import tqdm
 import config
 
 # --------------------------
-# Paramètres
+# Parameters
 # --------------------------
 VIDEO_DIR = Path(config.VIDEO_DIR)
 POSE_OUTPUT_DIR = Path(config.INTERMEDIATE_DIR) / "mediapipe_pose"
 
 MODEL_COMPLEXITY = 1
-FORCE_REPROCESS = False   # True = retraite même si le fichier de sortie existe déjà
-MAX_VIDEOS = None        # mets un petit nombre (ex. 2) pour tester avant de lancer sur les 120
+FORCE_REPROCESS = False   # True = reprocess even if the output file already exists
+MAX_VIDEOS = None         # set a small number (e.g. 2) to test before processing all 120 videos
 
 mp_pose = mp.solutions.pose
 POSE_LANDMARKS = [lm.name for lm in mp_pose.PoseLandmark]
@@ -60,7 +60,7 @@ def process_video(video_path: Path, output_path: Path):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     df = pd.DataFrame(rows)
     df.to_excel(output_path, index=False)
-    print(f"  -> {len(rows)} frames sauvegardées dans {output_path}")
+    print(f"  -> {len(rows)} frames saved to {output_path}")
 
 
 def main():
@@ -68,11 +68,11 @@ def main():
         v for v in VIDEO_DIR.rglob("*")
         if v.suffix.lower() in [".mp4", ".mov", ".avi"]
     )
-    print(f"{len(videos)} vidéo(s) trouvée(s) dans {VIDEO_DIR}")
+    print(f"{len(videos)} video(s) found in {VIDEO_DIR}")
 
     if MAX_VIDEOS is not None:
         videos = videos[:MAX_VIDEOS]
-        print(f"MAX_VIDEOS actif -> traitement limité à {len(videos)} vidéo(s)")
+        print(f"MAX_VIDEOS set -> processing limited to {len(videos)} video(s)")
 
     n_done, n_skipped = 0, 0
     for video_path in videos:
@@ -80,15 +80,15 @@ def main():
         output_path = POSE_OUTPUT_DIR / relative.with_name(f"{video_path.stem}_pose.xlsx")
 
         if output_path.exists() and not FORCE_REPROCESS:
-            print(f"Déjà traité, ignoré : {relative}")
+            print(f"Already processed, skipped: {relative}")
             n_skipped += 1
             continue
 
-        print(f"Traitement : {relative}")
+        print(f"Processing: {relative}")
         process_video(video_path, output_path)
         n_done += 1
 
-    print(f"\nTerminé. {n_done} vidéo(s) traitée(s), {n_skipped} ignorée(s) (déjà présentes).")
+    print(f"\nDone. {n_done} video(s) processed, {n_skipped} skipped (already present).")
 
 
 if __name__ == "__main__":

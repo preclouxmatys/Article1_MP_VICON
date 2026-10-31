@@ -1,4 +1,4 @@
-"""r07_figures.py : figures de l'article (version revisee)."""
+"""r06_figures.py: figures of the article (labels in French, as in the manuscript)."""
 from pathlib import Path
 import json, glob
 import numpy as np, pandas as pd
@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Circle, FancyArrowPatch, Wedge
 
 ROOT = Path(__file__).resolve().parents[2]
-REV = ROOT / "data/intermediate/revision"; OUT = ROOT / "data/final/revision"
+REV = ROOT / "data/intermediate/pipeline"; OUT = ROOT / "data/results"
 FIG = OUT / "figures"; FIG.mkdir(parents=True, exist_ok=True)
 df = pd.read_csv(REV / "r04_all_recordings.csv")
 for k in ["p95p5", "maxmin"]:
@@ -53,7 +53,7 @@ def scatter_ba(ax1, ax2, mp, ref, xlabel, ylabel, unit, title, data=None):
     df = df_save
 
 
-# Figure 1 : dispositif (vue de dessus, valeurs mesurees)
+# Figure 1: set-up seen from above (measured values)
 fig, ax = plt.subplots(figsize=(6.4, 3.6))
 D = key["interpersonal_mm_mean"] / 1000; az = np.radians(key["view_az_abs_median"])
 p1, p2 = np.array([0, 0]), np.array([D, 0])
@@ -61,7 +61,7 @@ for p, lab, ang in [(p1, "P1", 0), (p2, "P2", 180)]:
     ax.add_patch(Circle(p, .17, color="#cfd8e3", ec="#41536b", lw=1.2, zorder=3))
     ax.add_patch(Wedge(p, .17, ang - 25, ang + 25, color="#41536b", zorder=4))
     ax.text(p[0], p[1] - .3, lab, ha="center", fontsize=10, fontweight="bold")
-dist_cam = 3.1  # schematique (la distance absolue n'est pas identifiable avec un modele quasi affine)
+dist_cam = 3.1  # schematic (absolute distance cannot be identified with a near-affine camera model)
 for p, s, col, lab in [(p1, 1, "#3b6ea8", "Caméra P1"), (p2, -1, "#d08a2e", "Caméra P2")]:
     base = 0 if s == 1 else np.pi
     cam = p + dist_cam * np.array([np.cos(base + s * az), np.sin(base + s * az)])
@@ -76,7 +76,7 @@ ax.set_aspect("equal"); ax.axis("off"); ax.set_xlim(-1.5, D + 1.5); ax.set_ylim(
 ax.set_title("Dispositif vu de dessus (angles mesurés par calibration)", loc="center", fontsize=10)
 fig.tight_layout(); fig.savefig(FIG / "fig1_dispositif.png", dpi=300); plt.close(fig)
 
-# Figures 2-4 : comparaisons principales, SANS calibration (normalisees par la largeur d'epaule)
+# Figures 2-4: main comparisons, WITHOUT calibration (in shoulder widths)
 for fname, mp, ref, title in [
         ("fig2_qom_poignet.png", "QOM_WRIST_MP_norm", "QOM_WRIST_V3D25_norm", "QoM poignets"),
         ("fig3_qom_tete.png", "QOM_HEAD_MP_norm", "QOM_HEAD_tempmid_V3D25_norm", "QoM tête (nez MP vs milieu des tempes)"),
@@ -84,7 +84,7 @@ for fname, mp, ref, title in [
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(9, 3.8))
     scatter_ba(a1, a2, mp, ref, "Vicon 3D (largeurs d'épaule)", "MediaPipe 2D (largeurs d'épaule)", "larg. d'épaule", title)
     fig.tight_layout(); fig.savefig(FIG / fname, dpi=300); plt.close(fig)
-# Figure S3 : comparaisons dans le plan image (calibrations valides)
+# Figure S3: image-plane comparisons (valid calibrations only)
 fig, axs = plt.subplots(1, 3, figsize=(11, 3.6))
 for ax, mp, ref, title in [(axs[0], "QOM_WRIST_MP_px", "QOM_WRIST_VIC_px", "QoM poignets"),
                            (axs[1], "QOM_HEAD_MP_px", "QOM_HEAD_tempmid_VIC_px", "QoM tête"),
@@ -99,7 +99,7 @@ for ax, mp, ref, title in [(axs[0], "QOM_WRIST_MP_px", "QOM_WRIST_VIC_px", "QoM 
 axs[0].legend(frameon=False, fontsize=8)
 fig.tight_layout(); fig.savefig(FIG / "figS3_plan_image.png", dpi=300); plt.close(fig)
 
-# Figure 5 : angle du coude, bras proche vs eloigne
+# Figure 5: elbow angle, near vs far arm
 el = pd.read_csv(OUT / "elbow_per_recording_side.csv")
 fig, (a1, a2) = plt.subplots(1, 2, figsize=(9, 3.8))
 groups = [("Bras proche", el[el.near]), ("Bras éloigné", el[~el.near])]
@@ -117,7 +117,7 @@ for j, (metric, ax, ylab) in enumerate([("MP_V3D_r", a1, "r (série temporelle, 
 a1.set_title("Angle du coude : MediaPipe 2D vs Vicon 3D", loc="left")
 fig.tight_layout(); fig.savefig(FIG / "fig5_coude_proche_eloigne.png", dpi=300); plt.close(fig)
 
-# Figure 6 : serie temporelle (bras proche droit, enregistrement median)
+# Figure 6: time series (right near arm, recording with the median correlation)
 cand = el[(el.near) & (el.side == "D") & (el.calib_ok)].copy()
 med = cand.MP_V3D_r.median(); row = cand.iloc[(cand.MP_V3D_r - med).abs().argmin()]
 ts = np.load(REV / f"timeseries/{row.dyad}_{row.condition}_{row.pid}.npz")
@@ -132,7 +132,7 @@ fig.tight_layout(); fig.savefig(FIG / "fig6_coude_serie.png", dpi=300); plt.clos
 json.dump(dict(dyad=row.dyad, condition=row.condition, pid=row.pid, r=row.MP_V3D_r, rmse=row.MP_V3D_rmse,
                r_vic=row.MP_VIC_r), open(OUT / "fig6_example.json", "w"))
 
-# Figure S1 : effet de la correction des coordonnees normalisees
+# Figure S1: normalised coordinates vs pixels
 fig, axs = plt.subplots(1, 2, figsize=(9, 3.8))
 for ax, mp, ref, ttl in [(axs[0], "QOM_WRIST_MPnormcoord_norm", "QOM_WRIST_V3D25_norm", "Coordonnées normalisées"),
                          (axs[1], "QOM_WRIST_MP_norm", "QOM_WRIST_V3D25_norm", "Pixels")]:
@@ -142,7 +142,7 @@ for ax, mp, ref, ttl in [(axs[0], "QOM_WRIST_MPnormcoord_norm", "QOM_WRIST_V3D25
     ax.set_xlabel("Vicon 3D (largeurs d'épaule)"); ax.set_ylabel("MediaPipe (largeurs d'épaule)"); ax.set_title(ttl, loc="left")
 fig.tight_layout(); fig.savefig(FIG / "figS1_correction_pixels.png", dpi=300); plt.close(fig)
 
-# Figure S2 : decalages temporels
+# Figure S2: estimated time lags
 fig, ax = plt.subplots(figsize=(6, 3))
 ax.hist(df.lag_s.clip(-2, 2), bins=40, color="#3b6ea8", alpha=.8)
 ax.set_xlabel("Décalage MediaPipe – Vicon estimé (s, borné à ±2 s)"); ax.set_ylabel("Enregistrements")

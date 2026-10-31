@@ -1,15 +1,16 @@
-"""r08_world_landmarks.py : re-extraction MediaPipe (meme version 0.10.14,
-model_complexity=1) en conservant les pose_world_landmarks (3D metriques,
-origine au centre des hanches), sur un sous-echantillon equilibre de 20
-enregistrements (une dyade = un enregistrement ; conditions et participants
-en rotation). Usage : python r08_world_landmarks.py D01_SEATED_P1 [...]"""
+"""r07_world_landmarks.py: MediaPipe extraction (same version 0.10.14,
+model_complexity=1) keeping the pose_world_landmarks (metric 3D coordinates,
+origin at the hip centre), on a balanced subsample of 20 recordings (one
+recording per dyad; conditions and participants in rotation; the list is in
+data/results/world_landmarks_subset.csv).
+Usage: python r07_world_landmarks.py D01_SEATED_P1 [...]   (--part=k/K splits long videos)"""
 import sys, cv2, numpy as np, mediapipe as mp
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / "data/intermediate/revision/world"; OUT.mkdir(parents=True, exist_ok=True)
+OUT = ROOT / "data/intermediate/pipeline/world"; OUT.mkdir(parents=True, exist_ok=True)
 SWAP = {("D14", "SEMI"): {"P1": "P2", "P2": "P1"}}
 part = [a for a in sys.argv[1:] if a.startswith("--part=")]
-part = tuple(map(int, part[0][7:].split("/"))) if part else None  # ex. --part=1/2 (videos longues)
+part = tuple(map(int, part[0][7:].split("/"))) if part else None  # e.g. --part=1/2 (long videos)
 for rec in [a for a in sys.argv[1:] if not a.startswith("--")]:
     dy, co, pi = rec.split("_"); piv = SWAP.get((dy, co), {}).get(pi, pi)
     suffix = f"_part{part[0]}" if part else ""
