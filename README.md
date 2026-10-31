@@ -1,185 +1,105 @@
-# MediaPipe vs Vicon — Concurrent Validity for Movement Dynamics in Spontaneous Dyadic Conversation
+# MediaPipe vs Vicon during spontaneous dyadic conversation
 
-This repository contains the full, reproducible analysis pipeline for the concurrent
-validity study comparing MediaPipe BlazePose (markerless, monocular RGB) against a
-Vicon marker-based motion capture system (gold standard), for quantifying global
-movement dynamics (wrist and head Quantity of Movement, wrist amplitude, elbow angle)
-during spontaneous face-to-face dyadic conversation.
+Analysis code for the article *Measuring movement in conversation with a single camera:
+a comparison of MediaPipe and Vicon* (Precloux, Guyot, Pla & Marin).
 
-Twenty dyads (N = 40 participants) were recorded simultaneously with both systems
-across three postural conditions (seated, semi-standing, standing), giving 120
-participant x condition observations.
+Forty participants (20 dyads) conversed face-to-face in three postures (seated,
+semi-standing, standing). Each participant was recorded at the same time by a Vicon
+system (100 Hz) and by a video camera placed at a three-quarter view, processed with
+MediaPipe Pose 0.10.14. The pipeline compares the two systems on wrist and head
+quantity of movement (QoM), wrist amplitude and elbow angle.
 
-## Repository structure
+## Repository content
 
 ```
-Article1_MP_VICON/
-├── src/
-│   ├── config.py                          # paths and processing parameters
-│   ├── 01_mediapipe_extract_landmarks.py  # raw video -> MediaPipe Pose landmarks
-│   ├── 02_vicon_compute_qom_shoulder.py   # Vicon CSV -> QoM (wrist, head) + shoulder width
-│   ├── 03_mediapipe_compute_qom_shoulder.py # MediaPipe pose -> QoM (wrist, head) + shoulder width
-│   ├── 04_build_comparison_table.py       # merges Vicon + MediaPipe QoM into the final long-format table
-│   ├── 05_amplitude_mp_vs_vicon.py        # wrist peak-to-peak amplitude, MediaPipe vs Vicon (3 projection planes)
-│   ├── 06_elbow_angle_mp_vs_vicon.py      # elbow angle, MediaPipe (2D) vs Vicon (3D and projected 2D, 3 planes)
-│   ├── 07_validity_stats.R                # r, R^2, ICC(2,1), RMSE, bias, Bland-Altman, figures
-│   └── 08_permutation_test.py             # dyad x condition constrained permutation test
-├── data/
-│   ├── raw/            # NOT included in this repo (see Data availability below)
-│   ├── intermediate/   # generated automatically, not versioned
-│   └── final/           # final comparison tables, statistics, and figures (versioned)
-├── requirements.txt
-└── README.md
+src/
+├── config.py                         paths and acquisition parameters
+├── 01_mediapipe_extract_landmarks.py video -> MediaPipe Pose landmarks
+└── revision/                         analysis pipeline of the article
+    ├── r01_prepare_arrays.py         Vicon CSV + MediaPipe landmarks -> one .npz per recording
+    ├── r01b_extra_markers.py         extra Vicon markers (toes; tested for calibration, not retained)
+    ├── r02_audit.py                  data quality audit; wrist-based time lag
+    ├── r02b_head_sync.py             head-based time lag (nose vs temple midpoint)
+    ├── r03_match_check.py            checks that each video matches its Vicon file
+    ├── r04_process.py                synchronisation, filtering, camera calibration, all variables
+    ├── r05_stats.py                  agreement statistics (tables of the article)
+    ├── r07_figures.py                figures of the article
+    ├── r08_world_landmarks.py        MediaPipe 3D world landmarks (20-recording subsample)
+    ├── r09_world_compare.py          world landmarks vs Vicon 3D
+    └── r10_residual_analysis.py      Winter residual analysis (filter cut-off)
+data/final/revision/                  result tables (.csv), figures, key numbers
+requirements.txt
+```
+
+## Data availability
+
+Videos and Vicon trajectories are not shared: they contain identifiable participant data
+(ethics approval CER-UM, UM 2025-101bis). The result tables in `data/final/revision/`
+(one line per recording or per arm) are provided. To run the pipeline on equivalent data,
+place the raw files as follows:
+
+```
+data/raw/videos/D<dyad>/P<participant>/<condition>/*.mp4
+data/raw/vicon_csv/<condition>D<dyad>.csv        <condition> = SEATED, SEMI or STANDING
 ```
 
 ## Setup
 
-The pipeline requires Python 3.11 (MediaPipe's legacy Solutions API, used here, is not
-available in more recent MediaPipe releases) and R (>= 4.0) for the statistics step.
+Python 3.11.
 
 ```bash
-conda create -n syncogest python=3.11 -y
-conda activate syncogest
 pip install -r requirements.txt
 ```
 
-R packages required for `07_validity_stats.R`: `readxl`, `dplyr`, `tidyr`, `ggplot2`,
-`psych`, `writexl`, `scales`, `here`.
-
-## Data availability
-
-Raw video recordings and Vicon marker trajectories are not included in this
-repository, as they contain identifiable participant data collected under ethics
-approval (CER-UM, avis n° UM 2025-101bis). Researchers wishing to reproduce this
-analysis with their own equivalent data should place it as follows before running
-the pipeline:
-
-data/raw/videos/D<dyad>/P<participant>/<condition>/*.mp4
-data/raw/vicon_csv/<condition>D<dyad>.csv
-
-
-where `<condition>` is one of `SEATED`, `SEMI`, `STANDING`.
-
-## Reproducing the analysis
-
-Run the scripts in order from the `src/` directory:
+## Running the pipeline
 
 ```bash
-conda activate syncogest
 cd src
+python 01_mediapipe_extract_landmarks.py     # several hours for 120 videos
 
-python3 01_mediapipe_extract_landmarks.py   # ~2-4h for 120 videos
-python3 02_vicon_compute_qom_shoulder.py
-python3 03_mediapipe_compute_qom_shoulder.py
-python3 04_build_comparison_table.py
-python3 05_amplitude_mp_vs_vicon.py
-python3 06_elbow_angle_mp_vs_vicon.py
-Rscript 07_validity_stats.R
-python3 08_permutation_test.py
+cd revision
+python r01_prepare_arrays.py
+python r01b_extra_markers.py
+python r02_audit.py
+python r02b_head_sync.py
+python r03_match_check.py                     # optional check
+python r04_process.py                         # --force to recompute existing recordings
+python r05_stats.py
+python r07_figures.py
+python r08_world_landmarks.py <recordings>    # e.g. D01_SEATED_P1 ; list in world_landmarks_subset.csv
+python r09_world_compare.py
+python r10_residual_analysis.py
 ```
 
-Each script prints diagnostic checks (row counts, missing values) so that any
-mismatch between the two systems' outputs is caught immediately rather than
-silently propagating downstream.
+Intermediate files are written to `data/intermediate/` (not versioned). Tables, figures
+and `key_numbers.json` are written to `data/final/revision/`.
 
-Frame correspondence between MediaPipe and Vicon (100 Hz) is established using each
-recording's own estimated frame rate (`estimate_fps()` in scripts 05 and 06), not a
-fixed nominal value — actual MediaPipe throughput is closer to 25 fps for most
-recordings despite a nominal target of 30 fps, and this matters in particular for the
-frame-by-frame elbow-angle comparison. `config.FS_MP_NOMINAL` is used only as a
-fallback when the estimation itself fails.
+## Main methodological choices
 
-## Main results
-
-**Global movement (Quantity of Movement, wrist-width-normalized units)**
-
-| Segment       | n   | r     | R^2   | ICC(2,1) | Permutation p |
-|---------------|-----|-------|-------|----------|---------------|
-| QoM Wrist     | 120 | .929  | .862  | .859     | < .001        |
-| QoM Head      | 120 | .894  | .799  | .885     | < .001        |
-
-QoM Head uses the midpoint of Vicon's two bilateral temple markers as a single point
-(`qdm_head_midpoint` in `02_vicon_compute_qom_shoulder.py`), matching the single NOSE
-landmark used on the MediaPipe side; an earlier version that summed the two temple
-markers separately produced a much lower ICC due to a scale mismatch, not a genuine
-validity difference.
-
-**Wrist peak-to-peak amplitude (mm, MediaPipe vs Vicon projected onto each anatomical plane)**
-
-| Plane | n   | r    | R^2  | ICC(2,1) |
-|-------|-----|------|------|----------|
-| XY    | 120 | .539 | .290 | .143     |
-| XZ    | 120 | .737 | .543 | .397     |
-| YZ    | 120 | .609 | .371 | .244     |
-
-**Elbow angle (bilateral mean per recording, r Fisher-z–averaged across the 120 recordings x 2 sides)**
-
-| Reference Vicon | n   | r moyen | RMSE (deg) |
-|------------------|-----|---------|------------|
-| VI3 (raw 3D)     | 120 | .808    | 37.2       |
-| XZ (projected)   | 120 | .804    | 36.9       |
-| YZ (projected)   | 120 | .768    | 30.4       |
-| XY (projected)   | 120 | .142    | 71.8       |
-
-A strong correlation for the elbow angle reflects good temporal correspondence
-(MediaPipe and Vicon rise and fall together), not necessarily an accurate absolute
-angle: RMSE stays substantial (30–37°) even in the best-performing planes. Note that
-`07_validity_stats.R` currently reports the *arithmetic* mean of per-recording
-correlations in its `angle_summary` output; the Fisher z-average shown above (the
-statistically appropriate way to aggregate correlation coefficients) is computed as a
-downstream step from the same per-recording values in
-`data/final/comparison_elbow_angle_long.xlsx`, and is not yet built into the R script.
-
-Full results (including Bland-Altman bias/limits-of-agreement, proportional-bias
-regression, and dyad-cluster bootstrap confidence intervals) are in
-`data/final/validity_results_all.xlsx`, with figures in `data/final/figures/`.
-
-## Known limitations
-
-- MediaPipe wrist amplitude is scaled to millimeters via a per-participant
-  shoulder-width ratio; it is not a direct metric measurement.
-- The permutation-test robustness check repeated within each single posture condition
-  (`08_permutation_test.py`) uses n = 40 participants (20 dyads) per condition — these
-  are 40 distinct people, but not 40 statistically independent observations, since the
-  two members of a dyad remain non-independent of each other. Confidence intervals for
-  r and ICC(2,1) that account for this dyad-level clustering (dyad-cluster bootstrap,
-  5,000 resamples) are reported alongside the classical analytic ones in the article.
-- Classical analytic confidence intervals (r, ICC) assume independent observations;
-  the 120 participant x condition rows are not fully independent (20 dyads x 2
-  participants x 3 conditions), which the permutation test and dyad-cluster bootstrap
-  are both designed to address.
+- **Pixels.** MediaPipe normalised coordinates (x / width, y / height) are converted to
+  pixels before any distance or angle is computed.
+- **Filtering.** 4th-order zero-lag Butterworth low-pass filter at 6 Hz for both systems
+  (checked with a residual analysis, `r10`).
+- **Head.** The MediaPipe nose is compared with the midpoint of the two Vicon temple markers.
+- **Synchronisation.** No common trigger. The lag is estimated by cross-correlating head
+  speed in both systems, then refined by aligning shoulders and ankles. Arm analyses are
+  therefore never synchronised on the arms; head time-series analyses use the wrist-based lag.
+- **Primary comparison (no calibration).** QoM and amplitude are divided by the shoulder
+  width measured by the same system: MediaPipe in pixels, Vicon in millimetres. No MediaPipe
+  data is used to build the Vicon reference.
+- **Image-plane comparison (interpretation only).** Each camera is calibrated from Vicon
+  shoulder and ankle markers matched to MediaPipe landmarks (DLT, or affine model when
+  unstable). The Vicon is then projected into the image. Calibration is checked without
+  MediaPipe; 5 failed calibrations are excluded from this comparison only. The calibration
+  also defines the arm nearest to the camera ("near" arm).
+- **Data checks.** One video swap between partners (D14, semi-standing) is corrected in
+  `r04_process.py` (`VIDEO_SWAP`). Two Vicon CSV export formats are handled in `r01`.
 
 ## Citation
 
-*To be completed upon publication.*
+To be completed upon publication.
 
 ## Contact
 
-Matys Precloux — PhD candidate, EuroMov, University of Montpellier.
-
-## Analysis pipeline — `src/revision/`
-
-Run order (from `src/revision/`):
-`r01_prepare_arrays.py` → `r01b_extra_markers.py` → `r02_audit.py` → `r02b_head_sync.py` →
-`r03_match_check.py` (optional) → `r04_process.py` → `r05_stats.py` → `r07_figures.py` →
-`r08_world_landmarks.py <recordings>` → `r09_world_compare.py` → `r10_residual_analysis.py`.
-(`r06*` = interpersonal coordination, kept for a separate article — see `docs/IDEE_ARTICLE2_coordination.md`.)
-
-Key methodological choices:
-- **Pixel coordinates**: MediaPipe normalized coordinates (x/width, y/height) are converted to pixels
-  before any distance or angle computation.
-- **Frame mapping** on the video frame number (`frame` column), not the row index.
-- **Synchronization** (no common trigger): lag estimated by cross-correlation of HEAD speed
-  (MediaPipe nose vs Vicon temple midpoint), refined by reprojection of shoulders/ankles. Arms are never
-  used to synchronize arm analyses; head time-series analyses use the wrist-based lag. Both agree (median 0.04 s).
-- **Primary comparison (no calibration)**: MediaPipe 2D (px / MediaPipe shoulder width in px) vs Vicon 3D
-  (mm / Vicon shoulder width in mm). No MediaPipe data enters the reference.
-- **Secondary comparison (image plane)**: per-recording camera calibration (DLT, or affine model when
-  unstable) from shoulders + ankles; Vicon projected into the image. Calibration QC independent of
-  MediaPipe (projected / 3D-scaled amplitude ratio > 3 = failure; 5 recordings excluded from image-plane analyses).
-  Calibration also gives camera orientation and near/far arm classification.
-- **File swap**: D14 SEMI videos P1/P2 swapped (`VIDEO_SWAP`). Vicon export formats differ for D13–D15 (handled).
-- Filtering: 4th-order zero-lag Butterworth 6 Hz (Winter residual analysis: Vicon ≈ 6 Hz; MediaPipe ≈ 4 Hz).
-
-Extra Python packages: `pingouin`, `statsmodels`, `matplotlib`, `python-calamine`.
-Outputs: `data/final/revision/` (tables, figures, `key_numbers.json`).
+Matys Precloux, EuroMov Digital Health in Motion, Univ Montpellier, IMT Mines Alès —
+matys.precloux@umontpellier.fr
